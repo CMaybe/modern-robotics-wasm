@@ -1,0 +1,23 @@
+services:
+  dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        USER_UID: ${USER_UID:-1000}
+        USER_GID: ${USER_GID:-1000}
+    image: modern-robotics-wasm:dev
+    container_name: modern-robotics-wasm
+    working_dir: /home/robotics/modern-robotics-wasm
+    volumes:
+      - ..:/home/robotics/modern-robotics-wasm:cached
+      # Keep node_modules inside the container so a host install cannot shadow it.
+      - node_modules:/home/robotics/modern-robotics-wasm/web/node_modules
+    ports:
+      - "3000:3000"
+    stdin_open: true
+    tty: true
+    command: /bin/bash
+
+volumes:
+  node_modules:

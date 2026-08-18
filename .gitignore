@@ -1,0 +1,51 @@
+# Build directories
+build/
+install/
+dist/
+
+# Generated WebAssembly artifacts (produced by scripts/build_wasm.sh)
+web/public/wasm/
+
+# Third-party robot descriptions and meshes (~32 MB, fetched by scripts/fetch_meshes.sh)
+web/public/robots/
+
+# Node
+node_modules/
+npm-debug.log*
+.npm/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+Makefile
+
+# Binaries
+*.o
+*.a
+*.so
+*.out
+*.wasm
+
+# Logs and temporary files
+*.log
+*.bak
+*.tmp
+*~
+
+# Verification scratch output
+.browsercheck/
+
+# Local tooling config (machine-specific absolute paths)
+.claude/
+
+# IDE
+.idea/
+*.iml
+*.swp
+.DS_Store
+
+# Playwright
+web/playwright-report/
+web/test-results/

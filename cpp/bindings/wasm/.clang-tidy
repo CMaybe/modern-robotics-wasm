@@ -1,0 +1,4 @@
+# These method names cross into JavaScript, where camelCase is the convention,
+# so the C++ naming rule is relaxed for this directory only.
+InheritParentConfig: true
+Checks: '-readability-identifier-naming'

@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The dev image carries every toolchain (gcc, Eigen, Sophus, GoogleTest,
+  # Emscripten, Node), so CI and local development share one environment. Layer
+  # caching keeps the rebuild cheap; only a Dockerfile change pays full price.
+  checks:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the dev image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          tags: modern-robotics-wasm:dev
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Cache npm downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ hashFiles('web/package-lock.json') }}
+          restore-keys: npm-
+
+      # scripts/ci.sh is the single source of truth: clang-format, the C++ unit
+      # tests, the WebAssembly build and its binding smoke test, then the
+      # frontend type check and production build.
+      - name: Run the check suite
+        run: |
+          docker run --rm \
+            -v "${PWD}:/home/robotics/modern-robotics-wasm" \
+            -v "${HOME}/.npm:/home/robotics/.npm" \
+            -w /home/robotics/modern-robotics-wasm \
+            modern-robotics-wasm:dev \
+            scripts/ci.sh
+
+  # Kept separate: it needs browsers, and it exercises the whole WASM-to-WebGL
+  # path rather than any single unit. The vendor meshes are deliberately not
+  # downloaded here, so a third-party outage cannot fail the build; the viewer
+  # falls back to its schematic rendering, which is what this job checks.
+  e2e:
+    name: Browser end-to-end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the dev image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          tags: modern-robotics-wasm:dev
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build WebAssembly and run the browser tests
+        run: |
+          docker run --rm \
+            -v "${PWD}:/home/robotics/modern-robotics-wasm" \
+            -w /home/robotics/modern-robotics-wasm \
+            modern-robotics-wasm:dev \
+            scripts/e2e.sh
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: web/playwright-report
+          retention-days: 7

@@ -1,0 +1,127 @@
+/**
+ * TypeScript mirror of the embind surface declared in cpp/wasm/bindings.cpp.
+ * Keep the two in sync: embind performs no compile-time checking on this side.
+ */
+
+/** A rigid transform, delivered in the three shapes the viewer needs. */
+export interface Pose {
+  /** `[x, y, z]` in metres, space (base) frame. */
+  position: [number, number, number];
+  /** `[x, y, z, w]`, matching THREE.Quaternion ordering. */
+  quaternion: [number, number, number, number];
+  /** 16 elements, column-major, matching THREE.Matrix4.fromArray(). */
+  matrix: number[];
+}
+
+export interface JointLimit {
+  name: string;
+  /** Radians. */
+  lower: number;
+  /** Radians. */
+  upper: number;
+}
+
+export interface LinkFrames {
+  /** One pose per joint frame, base to tip, with the end-effector last. */
+  frames: Pose[];
+  /** Each joint's rotation axis in the space frame, as a unit vector. */
+  axes: [number, number, number][];
+}
+
+/**
+ * A manipulability ellipsoid: the image of the unit ball of joint velocities.
+ * Apply `quaternion` and scale by `radii` to turn a unit sphere into it.
+ */
+export interface Ellipsoid {
+  /** Principal-axis orientation, `[x, y, z, w]`. */
+  quaternion: [number, number, number, number];
+  /** Semi-axis lengths, descending. */
+  radii: [number, number, number];
+  /** Product of the semi-axes (the Yoshikawa measure for this block). */
+  volume: number;
+  /** `sigma_min / sigma_max` in [0, 1]; 1 is a sphere, 0 is singular. */
+  isotropy: number;
+}
+
+export interface ManipulabilityEllipsoids {
+  /** End-effector linear velocity, in m/rad. */
+  linear: Ellipsoid;
+  /** End-effector angular velocity, dimensionless. */
+  angular: Ellipsoid;
+}
+
+/**
+ * How each IK iteration turns the task error into a joint-space step.
+ *
+ * - `"qp"` — box-constrained QP: the joint limits are constraints of the step
+ *   itself, so saturating one joint redistributes the motion onto the others.
+ * - `"dls"` — damped least squares solved as if unbounded, then clamped.
+ */
+export type IkMethod = "qp" | "dls";
+
+export interface IkOptions {
+  method?: IkMethod;
+  maxIterations?: number;
+  positionTolerance?: number;
+  orientationTolerance?: number;
+  /** Levenberg-Marquardt lambda; larger is more stable but slower to converge. */
+  damping?: number;
+  /** Per-iteration clamp on the largest joint step, in radians. */
+  maxStep?: number;
+}
+
+export interface IkResult {
+  angles: number[];
+  converged: boolean;
+  iterations: number;
+  /** Metres. */
+  positionError: number;
+  /** Radians. */
+  orientationError: number;
+}
+
+/** A named configuration, guaranteed by C++ to sit inside the joint limits. */
+export interface RobotPreset {
+  label: string;
+  angles: number[];
+}
+
+/** Summary of a robot the module can build, from `availableRobots()`. */
+export interface RobotInfo {
+  id: string;
+  label: string;
+  dof: number;
+}
+
+/** The C++ `Robot` class, as seen from JavaScript. */
+export interface Robot {
+  id(): string;
+  label(): string;
+  dof(): number;
+  jointNames(): string[];
+  jointLimits(): JointLimit[];
+  /** The configuration the viewer should open in; always within the limits. */
+  defaultConfiguration(): number[];
+  presets(): RobotPreset[];
+  forward(angles: number[]): Pose;
+  linkFrames(angles: number[]): LinkFrames;
+  /** 6xDOF space Jacobian, row-major, in `[v; w]` ordering. */
+  jacobian(angles: number[]): number[];
+  manipulability(angles: number[]): number;
+  manipulabilityEllipsoids(angles: number[]): ManipulabilityEllipsoids;
+  inverse(
+    initialGuess: number[],
+    position: number[],
+    quaternion: number[],
+    options: IkOptions,
+  ): IkResult;
+  /** embind objects are not garbage collected; call this to free the C++ instance. */
+  delete(): void;
+}
+
+export interface KinematicsModule {
+  /** Every robot the module can build, in menu order. */
+  availableRobots(): RobotInfo[];
+  /** Builds a robot by id, or returns null when the id is unknown. */
+  createRobot(id: string): Robot | null;
+}

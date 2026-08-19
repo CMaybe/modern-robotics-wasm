@@ -81,6 +81,7 @@ cpp/
     collision/robot_geometry.hpp # link-attached capsules, derived from the chain's frames
     collision/world.hpp         # obstacle world + self/obstacle contact queries
     planning/rrt_connect.hpp    # RRT-Connect + shortcut smoothing (joint space)
+    planning/trajectory_optimizer.hpp # CHOMP-style smoothing on top of box_qp
     solvers/box_qp.hpp          # box-constrained QP (projected Gauss–Seidel)
     solvers/inverse_kinematics.hpp
     models/ur5.hpp              # UR5 (6 DOF)
@@ -346,9 +347,32 @@ Design notes:
   scanning candidate positions so both endpoints keep real clearance while the straight-line sweep
   penetrates deeply — the planner must detour to pass.
 
+### Optimisation-based smoothing (`planning/trajectory_optimizer.hpp`)
+
+The shortcut path is feasible but still a polyline with kinks and no clearance buffer, so a
+CHOMP-style pass follows. The path is densified, then each interior waypoint is repeatedly
+re-solved with its neighbours held fixed (coordinate descent over waypoints), minimising
+
+$$w_s\big(\lVert q - q_{prev}\rVert^2 + \lVert q_{next} - q\rVert^2\big)
++ w_o\,\max(0,\ d_{safe} - d(q))^2 + \lambda\lVert\Delta q\rVert^2$$
+
+subject to the joint limits and a per-sweep trust region. That is exactly the quadratic-plus-box
+shape of the IK step, so **`solve_box_qp` is reused verbatim** as the subproblem solver. The
+obstacle term is linearised through the collision witness: the signed distance grows along
+`normal` at the witness `point`, and a positional Jacobian of that point (`point_jacobian`) maps
+the direction into joint space — the gradient the collision module was designed to provide.
+
+The behaviour that falls out: the stretch term pulls the path straight until the obstacle term
+pushes back, so the result trades *excess* clearance for length and settles just below
+`safe_distance` — shorter than the shortcut where the shortcut was wasteful, curved where the
+shortcut had corners. A local method guarantees nothing, so the output is re-validated edge by
+edge; if that fails the densified shortcut (feasible by construction) is returned instead, and
+the UI says so.
+
 In the viewer: **Add obstacle** drops a draggable sphere, **Set goal = current** stores the goal,
-**Plan path** runs the planner from the current pose, and a found path replays at constant
-joint-space speed.
+**Plan path** runs the planner from the current pose, and three end-effector traces appear —
+raw RRT (dim grey), shortcut (yellow), optimized (bright cyan). The optimized path is the one
+that replays.
 
 ---
 
@@ -398,7 +422,8 @@ arm.collisionBody(angles);            // posed capsules + tightest self contact
 arm.nearestContact(angles, world);    // signed clearance, obstacles and self both
 const plan = arm.plan(startAngles, goalAngles, world, { seed: 7 });
 // plan.status ("success" | "start_invalid" | "goal_invalid" | "not_found")
-// plan.path · rawPath · iterations · nodes · pathLength · rawLength
+// plan.path · rawPath · optimizedPath · optimizedFeasible · iterations · nodes
+// plan.pathLength · rawLength · optimizedLength
 
 arm.delete();                 // embind objects are not garbage collected
 ```

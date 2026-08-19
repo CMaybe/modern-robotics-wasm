@@ -79,6 +79,7 @@ cpp/
     collision/robot_geometry.hpp # 링크에 붙는 캡슐 — 체인 프레임에서 자동 유도
     collision/world.hpp         # 장애물 월드 + 자기/장애물 충돌 쿼리
     planning/rrt_connect.hpp    # RRT-Connect + shortcut 스무딩 (관절 공간)
+    planning/trajectory_optimizer.hpp # box_qp를 재사용하는 CHOMP식 스무딩
     solvers/box_qp.hpp          # box 제약 QP (projected Gauss–Seidel)
     solvers/inverse_kinematics.hpp
     models/ur5.hpp              # UR5 (6 DOF)
@@ -323,8 +324,30 @@ $$T_i(\theta) = e^{[\mathcal{S}_0]\theta_0} \cdots e^{[\mathcal{S}_i]\theta_i} M
   자세는 실제 여유를 유지하고 직선 스윕은 깊게 관통하는 위치를 골랐습니다 — 플래너가 우회해야만
   통과하는 구성입니다.
 
+### 최적화 기반 스무딩 (`planning/trajectory_optimizer.hpp`)
+
+shortcut 경로는 유효하지만 여전히 꺾인 폴리라인이고 여유 버퍼도 없습니다. 그래서 CHOMP식
+패스가 뒤따릅니다. 경로를 촘촘히 나눈 뒤, 내부 웨이포인트 하나씩 이웃을 고정한 채 반복해서
+다시 풉니다 (웨이포인트 좌표 하강법):
+
+$$w_s\big(\lVert q - q_{prev}\rVert^2 + \lVert q_{next} - q\rVert^2\big)
++ w_o\,\max(0,\ d_{safe} - d(q))^2 + \lambda\lVert\Delta q\rVert^2$$
+
+제약은 관절 리밋 + 스윕당 신뢰 영역 — 정확히 IK 스텝과 같은 "2차식 + box" 형태라
+**`solve_box_qp` 를 서브문제 솔버로 그대로 재사용**합니다. 장애물 항은 충돌 위트니스로
+선형화합니다: 부호 거리는 위트니스 점에서 `normal` 방향으로 증가하고, 그 점의 위치 Jacobian
+(`point_jacobian`)이 이 방향을 관절 공간으로 사상합니다 — 충돌 모듈이 처음부터 그래디언트를
+반환하도록 설계한 이유입니다.
+
+그 결과 나오는 동작: 늘어남(stretch) 항이 경로를 곧게 당기다가 장애물 항이 되밀어서,
+**남는 여유를 길이와 교환**하고 `safe_distance` 바로 아래에서 평형을 이룹니다 — shortcut이
+낭비하던 곳은 더 짧아지고, 모서리는 곡선이 됩니다. 국소법은 아무것도 보장하지 않으므로 결과를
+엣지 단위로 재검증하고, 실패하면 (구성상 유효한) 촘촘한 shortcut 경로를 대신 반환하며 UI에
+그렇게 표시됩니다.
+
 뷰어에서는 **Add obstacle** 로 드래그 가능한 구를 놓고, **Set goal = current** 로 목표를 저장한 뒤,
-**Plan path** 가 현재 자세에서 계획을 실행하고, 찾은 경로는 일정한 관절 속도로 재생됩니다.
+**Plan path** 를 누르면 EE 궤적 세 개가 그려집니다 — 원시 RRT(어두운 회색), shortcut(노랑),
+optimized(밝은 청록). 재생되는 것은 optimized 경로입니다.
 
 ---
 
@@ -373,7 +396,8 @@ arm.collisionBody(angles);            // 캡슐 포즈 + 가장 가까운 자기
 arm.nearestContact(angles, world);    // 장애물·자기충돌 포함 부호 있는 여유
 const plan = arm.plan(startAngles, goalAngles, world, { seed: 7 });
 // plan.status ("success" | "start_invalid" | "goal_invalid" | "not_found")
-// plan.path · rawPath · iterations · nodes · pathLength · rawLength
+// plan.path · rawPath · optimizedPath · optimizedFeasible · iterations · nodes
+// plan.pathLength · rawLength · optimizedLength
 
 arm.delete();                 // embind 객체는 GC되지 않음
 ```

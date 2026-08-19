@@ -191,6 +191,14 @@ async function main() {
     planned.path.every((q) => q.every((angle, i) => angle >= ur5Limits[i].lower - 1e-4 && angle <= ur5Limits[i].upper + 1e-4)));
   check("shortcutting never lengthens the path", planned.pathLength <= planned.rawLength + 1e-4,
     `${planned.pathLength} vs ${planned.rawLength}`);
+  check("the optimizer returns a feasible path", planned.optimizedFeasible === true);
+  check("optimized endpoints match start and goal",
+    planned.optimizedPath.length >= 2 &&
+    planned.optimizedPath[0].every((v, i) => close(v, planStart[i], 1e-4)) &&
+    planned.optimizedPath[planned.optimizedPath.length - 1].every((v, i) => close(v, planGoal[i], 1e-4)));
+  check("optimized waypoints respect the joint limits",
+    planned.optimizedPath.every((q) =>
+      q.every((angle, i) => angle >= ur5Limits[i].lower - 1e-4 && angle <= ur5Limits[i].upper + 1e-4)));
   check("an unreachable goal reports goal_invalid",
     ur5.plan(planStart, [0, 0, Math.PI, 0, 0, 0], {}, {}).status === "goal_invalid");
 

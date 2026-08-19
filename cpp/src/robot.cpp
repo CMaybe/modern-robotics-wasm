@@ -104,7 +104,8 @@ public:
     [[nodiscard]] DynamicPlanResult plan(const Eigen::VectorXf& start,
                                          const Eigen::VectorXf& goal,
                                          const collision::CollisionWorld& world,
-                                         const planning::Options& options) const override {
+                                         const planning::Options& options,
+                                         const planning::TrajectoryOptions& trajectory) const override {
         const planning::Result<Dof> result =
             planning::plan_rrt_connect(chain_, geometry_, world, to_fixed(start), to_fixed(goal), options);
 
@@ -114,6 +115,13 @@ public:
         dynamic.nodes = result.nodes;
         dynamic.path.assign(result.path.begin(), result.path.end());
         dynamic.raw_path.assign(result.raw_path.begin(), result.raw_path.end());
+
+        if (result.success()) {
+            const planning::TrajectoryResult<Dof> optimized =
+                planning::optimize_path(chain_, geometry_, world, result.path, trajectory);
+            dynamic.optimized_path.assign(optimized.path.begin(), optimized.path.end());
+            dynamic.optimized_feasible = optimized.feasible;
+        }
         return dynamic;
     }
 

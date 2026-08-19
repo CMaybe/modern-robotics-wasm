@@ -107,6 +107,14 @@ export interface PlanOptions {
   shortcutRounds?: number;
   /** RNG seed; the same seed reproduces the same path. */
   seed?: number;
+  /** Waypoint spacing the optimizer densifies to, radians. */
+  spacing?: number;
+  /** Coordinate-descent sweeps of the trajectory optimizer. */
+  optimizerSweeps?: number;
+  smoothnessWeight?: number;
+  obstacleWeight?: number;
+  /** Clearance below which the obstacle cost activates, metres. */
+  safeDistance?: number;
 }
 
 export interface PlanResult {
@@ -115,12 +123,18 @@ export interface PlanResult {
   path: number[][];
   /** The path as the trees found it, before shortcutting. */
   rawPath: number[][];
+  /** The shortcut path after optimisation-based smoothing (densified shortcut when infeasible). */
+  optimizedPath: number[][];
+  /** Whether the optimizer's own output passed full edge validation. */
+  optimizedFeasible: boolean;
   iterations: number;
   nodes: number;
   /** Joint-space length of `path`, radians. */
   pathLength: number;
   /** Joint-space length of `rawPath`, radians. */
   rawLength: number;
+  /** Joint-space length of `optimizedPath`, radians. */
+  optimizedLength: number;
 }
 
 /**

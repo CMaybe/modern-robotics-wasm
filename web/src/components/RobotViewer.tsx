@@ -15,10 +15,12 @@ export interface ViewerObstacle extends SphereObstacle {
 
 /** End-effector traces of the planner's output, as joint-space waypoint lists. */
 export interface PlannedPathTraces {
-  /** The shortcut path the arm will replay. */
-  smoothed: number[][];
-  /** The raw RRT-Connect path, drawn dimmer for comparison. */
+  /** The raw RRT-Connect path, drawn dimmest. */
   raw: number[][];
+  /** The shortcut path, drawn mid-bright. */
+  smoothed: number[][];
+  /** The optimiser's output — the path the arm replays, drawn brightest. */
+  optimized: number[][];
 }
 
 /** Vendor meshes from the official URDF, or the abstract link/joint skeleton. */
@@ -86,6 +88,7 @@ const COLOR_OBSTACLE = 0xcc8844;
 const COLOR_OBSTACLE_SELECTED = 0xffaa55;
 const COLOR_PATH_SMOOTHED = 0xffd166;
 const COLOR_PATH_RAW = 0x8899aa;
+const COLOR_PATH_OPTIMIZED = 0x66e0ff;
 
 /**
  * Metres drawn per unit of ellipsoid radius. The linear block is in m/rad and
@@ -492,8 +495,9 @@ export default function RobotViewer({
       scene.add(line);
       return line;
     };
-    const rawPathLine = makePathLine(COLOR_PATH_RAW, 0.45);
-    const smoothedPathLine = makePathLine(COLOR_PATH_SMOOTHED, 0.9);
+    const rawPathLine = makePathLine(COLOR_PATH_RAW, 0.35);
+    const smoothedPathLine = makePathLine(COLOR_PATH_SMOOTHED, 0.55);
+    const optimizedPathLine = makePathLine(COLOR_PATH_OPTIMIZED, 0.95);
 
     const syncPlannedPaths = (paths: PlannedPathTraces | null) => {
       const apply = (line: THREE.Line, path: number[][] | undefined) => {
@@ -504,6 +508,7 @@ export default function RobotViewer({
       };
       apply(rawPathLine, paths?.raw);
       apply(smoothedPathLine, paths?.smoothed);
+      apply(optimizedPathLine, paths?.optimized);
     };
     syncPlannedPathsRef.current = syncPlannedPaths;
 
@@ -814,7 +819,7 @@ export default function RobotViewer({
       obstacleDraggingRef.current = false;
       syncObstaclesRef.current = null;
 
-      for (const line of [rawPathLine, smoothedPathLine]) {
+      for (const line of [rawPathLine, smoothedPathLine, optimizedPathLine]) {
         line.geometry.dispose();
         (line.material as THREE.Material).dispose();
       }

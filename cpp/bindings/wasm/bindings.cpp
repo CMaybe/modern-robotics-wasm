@@ -330,9 +330,11 @@ public:
      * @param start Start joint angles; must be legal and clear of the obstacles.
      * @param goal Goal joint angles, same requirements.
      * @param world Optional `{ spheres: [{ center, radius }] }`.
-     * @param options Optional `{ maxIterations, step, resolution, margin, shortcutRounds, seed }`.
-     * @return `{ status, path, rawPath, iterations, nodes, pathLength, rawLength }`;
-     *         paths are arrays of joint vectors and lengths are radians of joint motion.
+     * @param options Optional `{ maxIterations, step, resolution, margin, shortcutRounds, seed,
+     *                spacing, optimizerSweeps, smoothnessWeight, obstacleWeight, safeDistance }`.
+     * @return `{ status, path, rawPath, optimizedPath, optimizedFeasible, iterations, nodes,
+     *         pathLength, rawLength, optimizedLength }`; paths are arrays of joint vectors and
+     *         lengths are radians of joint motion.
      */
     [[nodiscard]] val plan(const val& start, const val& goal, const val& world, const val& options) const {
         const robotics::planning::Options settings{
@@ -343,8 +345,20 @@ public:
             .shortcut_rounds = static_cast<int>(read_number(options, "shortcutRounds", 150)),
             .seed = static_cast<std::uint32_t>(read_number(options, "seed", 2026)),
         };
+        // The optimiser shares the planner's collision margin and check spacing,
+        // so "smoothed" can never mean "checked more loosely".
+        const robotics::planning::TrajectoryOptions trajectory{
+            .spacing = read_number(options, "spacing", Scalar{0.15}),
+            .max_sweeps = static_cast<int>(read_number(options, "optimizerSweeps", 60)),
+            .smoothness_weight = read_number(options, "smoothnessWeight", Scalar{1}),
+            .obstacle_weight = read_number(options, "obstacleWeight", Scalar{100}),
+            .safe_distance = read_number(options, "safeDistance", Scalar{0.05}),
+            .resolution = settings.resolution,
+            .margin = settings.margin,
+        };
 
-        const robotics::DynamicPlanResult result = model_->plan(joints(start), joints(goal), to_world(world), settings);
+        const robotics::DynamicPlanResult result =
+            model_->plan(joints(start), joints(goal), to_world(world), settings, trajectory);
 
         const auto pack = [](const std::vector<Eigen::VectorXf>& path) {
             val array = val::array();
@@ -381,10 +395,13 @@ public:
         object.set("status", std::string{status});
         object.set("path", pack(result.path));
         object.set("rawPath", pack(result.raw_path));
+        object.set("optimizedPath", pack(result.optimized_path));
+        object.set("optimizedFeasible", result.optimized_feasible);
         object.set("iterations", result.iterations);
         object.set("nodes", result.nodes);
         object.set("pathLength", length(result.path));
         object.set("rawLength", length(result.raw_path));
+        object.set("optimizedLength", length(result.optimized_path));
         return object;
     }
 

@@ -10,6 +10,7 @@
 #include "robotics/kinematics/manipulability.hpp"
 #include "robotics/kinematics/serial_chain.hpp"
 #include "robotics/planning/rrt_connect.hpp"
+#include "robotics/planning/trajectory_optimizer.hpp"
 #include "robotics/solvers/inverse_kinematics.hpp"
 
 namespace robotics {
@@ -25,6 +26,10 @@ struct DynamicPlanResult {
     planning::Status status{planning::Status::kNotFound};
     std::vector<Eigen::VectorXf> path;      ///< Shortcut waypoints, start to goal; empty on failure.
     std::vector<Eigen::VectorXf> raw_path;  ///< The path before shortcutting.
+    /// The shortcut path after optimisation-based smoothing; falls back to the
+    /// densified shortcut when the optimiser's validation fails.
+    std::vector<Eigen::VectorXf> optimized_path;
+    bool optimized_feasible{false};  ///< Whether the optimiser's own output validated.
     int iterations{};
     int nodes{};
 };
@@ -85,11 +90,13 @@ public:
     /// The tightest approach at `joints`, obstacles and self both.
     [[nodiscard]] virtual collision::Contact nearest_contact(const Eigen::VectorXf& joints,
                                                              const collision::CollisionWorld& world) const = 0;
-    /// Plans a collision-free joint path from `start` to `goal` with RRT-Connect.
+    /// Plans a collision-free joint path from `start` to `goal` with RRT-Connect,
+    /// then smooths the shortcut result with the trajectory optimiser.
     [[nodiscard]] virtual DynamicPlanResult plan(const Eigen::VectorXf& start,
                                                  const Eigen::VectorXf& goal,
                                                  const collision::CollisionWorld& world,
-                                                 const planning::Options& options) const = 0;
+                                                 const planning::Options& options,
+                                                 const planning::TrajectoryOptions& trajectory) const = 0;
 
 protected:
     Robot() = default;

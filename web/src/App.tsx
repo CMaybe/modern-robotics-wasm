@@ -135,7 +135,9 @@ export default function App() {
     if (!playing || !arm || plan?.owner !== arm || plan.result.status !== "success") {
       return undefined;
     }
-    const path = plan.result.path;
+    // Replay the optimized path — it falls back to the densified shortcut when
+    // the optimizer's validation failed, so it is always safe to follow.
+    const path = plan.result.optimizedPath.length > 1 ? plan.result.optimizedPath : plan.result.path;
     const cumulative = [0];
     for (let i = 1; i < path.length; i += 1) {
       cumulative.push(
@@ -200,7 +202,11 @@ export default function App() {
   const plannedPaths = useMemo(
     () =>
       plan?.owner === arm && plan.result.status === "success"
-        ? { smoothed: plan.result.path, raw: plan.result.rawPath }
+        ? {
+            raw: plan.result.rawPath,
+            smoothed: plan.result.path,
+            optimized: plan.result.optimizedPath,
+          }
         : null,
     [arm, plan],
   );
@@ -216,9 +222,10 @@ export default function App() {
     switch (result.status) {
       case "success":
         return (
-          `Path found: ${result.path.length} waypoints, ${result.pathLength.toFixed(2)} rad after ` +
-          `shortcutting (raw ${result.rawPath.length} waypoints, ${result.rawLength.toFixed(2)} rad); ` +
-          `${result.nodes} tree nodes in ${result.iterations} iterations.`
+          `Path found: raw ${result.rawLength.toFixed(2)} rad (${result.rawPath.length} waypoints) → ` +
+          `shortcut ${result.pathLength.toFixed(2)} rad → optimized ${result.optimizedLength.toFixed(2)} rad` +
+          `${result.optimizedFeasible ? "" : " (optimizer fell back to the shortcut path)"}; ` +
+          `${result.nodes} tree nodes in ${result.iterations} iterations. The bright trace replays.`
         );
       case "start_invalid":
         return "The current pose is in collision or out of limits — move the arm clear and plan again.";

@@ -74,6 +74,15 @@ function checkCommonContract(arm, expectedDof) {
       close(e.volume, e.radii[0] * e.radii[1] * e.radii[2], 1e-5));
   }
 
+  const body = arm.collisionBody(preset);
+  check(`${arm.id()}: collision body has capsules with positive radii`,
+    body.capsules.length > 0 &&
+    body.capsules.every((c) => c.radius > 0 && c.start.length === 3 && c.end.length === 3 && Number.isInteger(c.link)));
+  check(`${arm.id()}: default configuration is self-collision free`,
+    body.selfContact.distance > 0, `distance=${body.selfContact.distance}`);
+  check(`${arm.id()}: self-contact normal is a unit vector`,
+    close(Math.hypot(...body.selfContact.normal), 1, 1e-4), JSON.stringify(body.selfContact.normal));
+
   // IK round trip from a perturbed seed.
   const seed = preset.map((angle, i) => angle + (i % 2 === 0 ? 0.15 : -0.12));
   const result = arm.inverse(seed, pose.position, pose.quaternion, {});
@@ -127,6 +136,10 @@ async function main() {
     close(folded.position[1], 0.109, 1e-3) &&
     close(folded.position[2], 0.988, 1e-3),
     JSON.stringify(folded.position));
+  // Elbow at pi folds the wrist into the base column; the capsule model must say so.
+  const foldedBody = ur5.collisionBody([0, 0, Math.PI, 0, 0, 0]);
+  check("UR5 folded elbow reports a self-collision",
+    foldedBody.selfContact.distance < 0, `distance=${foldedBody.selfContact.distance}`);
   // At home every UR5 joint axis lies in the y-z plane, so the angular ellipsoid is a disc.
   const ur5Home = ur5.manipulabilityEllipsoids([0, 0, 0, 0, 0, 0]);
   check("UR5 angular ellipsoid collapses to a disc at home",

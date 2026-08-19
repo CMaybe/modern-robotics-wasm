@@ -6,6 +6,7 @@
 #include <string_view>
 #include <vector>
 
+#include "robotics/collision/world.hpp"
 #include "robotics/kinematics/manipulability.hpp"
 #include "robotics/kinematics/serial_chain.hpp"
 #include "robotics/solvers/inverse_kinematics.hpp"
@@ -66,6 +67,11 @@ public:
     [[nodiscard]] virtual DynamicIkResult inverse(const Pose& target,
                                                   const Eigen::VectorXf& seed,
                                                   const ik::Options& options) const = 0;
+
+    /// The collision body posed at `joints`, in the space frame.
+    [[nodiscard]] virtual std::vector<collision::PosedCapsule> collision_capsules(const Eigen::VectorXf& joints) const = 0;
+    /// The tightest self-collision pair at `joints` (infinite when none is checked).
+    [[nodiscard]] virtual collision::Contact self_contact(const Eigen::VectorXf& joints) const = 0;
 
 protected:
     Robot() = default;

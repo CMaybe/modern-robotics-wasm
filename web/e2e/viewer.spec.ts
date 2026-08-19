@@ -118,6 +118,20 @@ test.describe("viewer", () => {
     await expect(isotropy).toContainText("0.0000");
   });
 
+  test("the collision overlay reports clearance and flags a folded elbow", async ({ page }) => {
+    await waitForViewer(page);
+    await page.getByLabel("Collision capsules").check();
+
+    // The opening pose is legal, so the readout shows a positive clearance.
+    await expect(page.getByTestId("self-clearance")).toContainText("self-clearance");
+
+    // Elbow at 180 degrees folds the wrist into the base column; the capsule
+    // model computed in C++ must call that a self-collision.
+    await page.getByRole("button", { name: "Home", exact: true }).click();
+    await setSlider(page, 2, 180);
+    await expect(page.getByTestId("self-clearance")).toContainText("Self-collision");
+  });
+
   test("both IK step rules are selectable", async ({ page }) => {
     await waitForViewer(page);
 

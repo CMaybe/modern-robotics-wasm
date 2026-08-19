@@ -29,11 +29,13 @@ public:
     ChainRobot(std::string_view id,
                std::string_view label,
                SerialChain<Dof> chain,
+               collision::RobotGeometry geometry,
                const JointVector<Dof>& default_joints,
                std::vector<RobotPreset> presets)
         : id_{id}
         , label_{label}
         , chain_{std::move(chain)}
+        , geometry_{std::move(geometry)}
         , presets_{std::move(presets)}
         , lower_{chain_.lower_limits()}
         , upper_{chain_.upper_limits()}
@@ -86,6 +88,14 @@ public:
                                .orientation_error = result.orientation_error};
     }
 
+    [[nodiscard]] std::vector<collision::PosedCapsule> collision_capsules(const Eigen::VectorXf& joints) const override {
+        return collision::pose_geometry(geometry_, chain_.link_poses(to_fixed(joints)));
+    }
+
+    [[nodiscard]] collision::Contact self_contact(const Eigen::VectorXf& joints) const override {
+        return collision::self_contact(geometry_, collision_capsules(joints));
+    }
+
 private:
     /// Truncates or zero-pads a runtime-sized vector to this arm's joint count.
     [[nodiscard]] static JointVector<Dof> to_fixed(const Eigen::VectorXf& joints) {
@@ -98,6 +108,7 @@ private:
     std::string id_;
     std::string label_;
     SerialChain<Dof> chain_;
+    collision::RobotGeometry geometry_;
     std::vector<RobotPreset> presets_;
     std::vector<std::string> names_;
     Eigen::VectorXf lower_;
@@ -116,7 +127,10 @@ private:
     presets.push_back(preset("MR Example 4.5", {0.0F, -kHalfPi, 0.0F, 0.0F, kHalfPi, 0.0F}));
     presets.push_back(preset("Wrist singularity", {0.0F, -0.6F, 0.9F, 0.0F, 0.0F, 0.0F}));
 
-    return std::make_unique<ChainRobot<models::kUr5Dof>>("ur5", "Universal Robots UR5", models::ur5(), ready, std::move(presets));
+    auto chain = models::ur5();
+    auto geometry = models::ur5_collision(chain);
+    return std::make_unique<ChainRobot<models::kUr5Dof>>(
+        "ur5", "Universal Robots UR5", std::move(chain), std::move(geometry), ready, std::move(presets));
 }
 
 [[nodiscard]] std::unique_ptr<Robot> make_fr3_robot() {
@@ -129,8 +143,10 @@ private:
     // Joint 4 at its upper limit is as straight as an FR3 gets: an elbow singularity.
     presets.push_back(preset("Elbow singularity", {0.0F, 0.0F, 0.0F, -0.1518F, 0.0F, kHalfPi, 0.0F}));
 
+    auto chain = models::fr3();
+    auto geometry = models::fr3_collision(chain);
     return std::make_unique<ChainRobot<models::kFr3Dof>>(
-        "fr3", "Franka Research 3", models::fr3(), models::fr3_ready(), std::move(presets));
+        "fr3", "Franka Research 3", std::move(chain), std::move(geometry), models::fr3_ready(), std::move(presets));
 }
 
 }  // namespace

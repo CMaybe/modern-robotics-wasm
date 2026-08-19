@@ -35,6 +35,8 @@ export interface RobotViewerProps {
   gizmoMode: GizmoMode;
   /** Draws a coloured arrow along every joint's rotation axis. */
   showJointAxes: boolean;
+  /** Overlays the collision capsules; they turn red on a self-collision. */
+  showCollision: boolean;
   /** Which manipulability ellipsoid to overlay on the end-effector. */
   ellipsoidMode: EllipsoidMode;
   /** Whether to draw the vendor meshes or the schematic skeleton. */
@@ -57,6 +59,8 @@ const COLOR_BASE = 0x39424e;
 const COLOR_JOINT_AXIS = 0x4dd4ac;
 const COLOR_ELLIPSOID_LINEAR = 0x4d9dff;
 const COLOR_ELLIPSOID_ANGULAR = 0xc46dff;
+const COLOR_COLLISION_CLEAR = 0x59c96b;
+const COLOR_COLLISION_HIT = 0xff4d5e;
 
 /**
  * Metres drawn per unit of ellipsoid radius. The linear block is in m/rad and
@@ -99,6 +103,7 @@ export default function RobotViewer({
   onIkResult,
   gizmoMode,
   showJointAxes,
+  showCollision,
   ellipsoidMode,
   displayMode,
   onMeshStatus,
@@ -125,6 +130,9 @@ export default function RobotViewer({
   const ellipsoidModeRef = useRef(ellipsoidMode);
   const setEllipsoidModeRef = useRef<((mode: EllipsoidMode) => void) | null>(null);
   ellipsoidModeRef.current = ellipsoidMode;
+  const showCollisionRef = useRef(showCollision);
+  const setShowCollisionRef = useRef<((show: boolean) => void) | null>(null);
+  showCollisionRef.current = showCollision;
   const onMeshStatusRef = useRef(onMeshStatus);
   onMeshStatusRef.current = onMeshStatus;
   const displayModeRef = useRef(displayMode);
@@ -280,6 +288,47 @@ export default function RobotViewer({
       const color = mode === "angular" ? COLOR_ELLIPSOID_ANGULAR : COLOR_ELLIPSOID_LINEAR;
       ellipsoidSurface.color.setHex(color);
       ellipsoidWireframe.color.setHex(color);
+    };
+
+    // ---- Collision capsules ------------------------------------------------
+    // Each capsule is rigid, so its geometry is built once from the C++ body and
+    // only re-posed per frame. The shared material flips to red on self-collision.
+    const collisionGroup = new THREE.Group();
+    collisionGroup.visible = showCollisionRef.current;
+    robotGroup.add(collisionGroup);
+
+    const collisionMaterial = new THREE.MeshStandardMaterial({
+      color: COLOR_COLLISION_CLEAR,
+      transparent: true,
+      opacity: 0.3,
+      roughness: 0.5,
+      metalness: 0.0,
+      depthWrite: false,
+    });
+    const collisionGeometries: THREE.CapsuleGeometry[] = [];
+    const collisionMeshes: THREE.Mesh[] = [];
+    for (const capsule of arm.collisionBody(arm.defaultConfiguration()).capsules) {
+      const length = new THREE.Vector3()
+        .fromArray(capsule.end)
+        .distanceTo(new THREE.Vector3().fromArray(capsule.start));
+      const geometry = new THREE.CapsuleGeometry(capsule.radius, length, 6, 16);
+      collisionGeometries.push(geometry);
+      const mesh = new THREE.Mesh(geometry, collisionMaterial);
+      collisionGroup.add(mesh);
+      collisionMeshes.push(mesh);
+    }
+
+    // Marks the witness point of the tightest self pair while it penetrates.
+    const contactMarker = new THREE.Mesh(
+      new THREE.SphereGeometry(0.02, 16, 12),
+      new THREE.MeshBasicMaterial({ color: COLOR_COLLISION_HIT, depthTest: false }),
+    );
+    contactMarker.renderOrder = 3;
+    contactMarker.visible = false;
+    collisionGroup.add(contactMarker);
+
+    setShowCollisionRef.current = (show: boolean) => {
+      collisionGroup.visible = show;
     };
 
     // ---- Vendor meshes ---------------------------------------------------
@@ -439,6 +488,23 @@ export default function RobotViewer({
       endEffectorAxes.position.fromArray(endEffector.position);
       endEffectorAxes.quaternion.fromArray(endEffector.quaternion);
 
+      if (collisionGroup.visible) {
+        const body = arm.collisionBody(angles);
+        for (let i = 0; i < collisionMeshes.length && i < body.capsules.length; i += 1) {
+          const start = new THREE.Vector3().fromArray(body.capsules[i].start);
+          const direction = new THREE.Vector3().fromArray(body.capsules[i].end).sub(start);
+          collisionMeshes[i].position.copy(start).addScaledVector(direction, 0.5);
+          collisionMeshes[i].quaternion.setFromUnitVectors(CYLINDER_AXIS, direction.normalize());
+        }
+
+        const colliding = body.selfContact.distance <= 0;
+        collisionMaterial.color.setHex(colliding ? COLOR_COLLISION_HIT : COLOR_COLLISION_CLEAR);
+        contactMarker.visible = colliding;
+        if (colliding) {
+          contactMarker.position.fromArray(body.selfContact.point);
+        }
+      }
+
       const mode = ellipsoidModeRef.current;
       if (mode !== "off") {
         const { radii, quaternion } = arm.manipulabilityEllipsoids(angles)[mode];
@@ -553,6 +619,12 @@ export default function RobotViewer({
       ellipsoidWireframe.dispose();
       setEllipsoidModeRef.current = null;
 
+      collisionGeometries.forEach((geometry) => geometry.dispose());
+      collisionMaterial.dispose();
+      contactMarker.geometry.dispose();
+      (contactMarker.material as THREE.Material).dispose();
+      setShowCollisionRef.current = null;
+
       disposed = true;
       setDisplayModeRef.current = null;
       applyUrdfJointsRef.current = null;
@@ -614,6 +686,12 @@ export default function RobotViewer({
     setEllipsoidModeRef.current?.(ellipsoidMode);
     applyAnglesRef.current?.(jointAnglesRef.current);
   }, [arm, ellipsoidMode]);
+
+  // The capsules are only re-posed while visible, so enabling them needs a redraw.
+  useEffect(() => {
+    setShowCollisionRef.current?.(showCollision);
+    applyAnglesRef.current?.(jointAnglesRef.current);
+  }, [arm, showCollision]);
 
   useEffect(() => {
     setDisplayModeRef.current?.(displayMode);

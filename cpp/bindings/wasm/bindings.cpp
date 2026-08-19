@@ -248,6 +248,42 @@ public:
     }
 
     /**
+     * @brief The collision body posed at `angles`, plus the tightest self pair.
+     *
+     * Capsule endpoints are in the space frame, so the viewer can draw them
+     * without touching link transforms. `selfContact.distance` is the signed
+     * clearance in metres (negative = penetration, Infinity = nothing checked).
+     *
+     * @return `{ capsules: [{ start, end, radius, link }], selfContact: { distance, link, point, normal } }`.
+     */
+    [[nodiscard]] val collisionBody(const val& angles) const {
+        const Eigen::VectorXf configuration = joints(angles);
+
+        val capsules = val::array();
+        int index = 0;
+        for (const auto& capsule : model_->collision_capsules(configuration)) {
+            val entry = val::object();
+            entry.set("start", from_vector3(capsule.world.start));
+            entry.set("end", from_vector3(capsule.world.end));
+            entry.set("radius", capsule.world.radius);
+            entry.set("link", capsule.link);
+            capsules.set(index++, entry);
+        }
+
+        const robotics::collision::Contact contact = model_->self_contact(configuration);
+        val self = val::object();
+        self.set("distance", contact.distance);
+        self.set("link", contact.link);
+        self.set("point", from_vector3(contact.point));
+        self.set("normal", from_vector3(contact.normal));
+
+        val result = val::object();
+        result.set("capsules", capsules);
+        result.set("selfContact", self);
+        return result;
+    }
+
+    /**
      * @brief Solves IK for a target pose.
      * @param initialGuess Seed joint angles; pass the current configuration when dragging.
      * @param position Target position `[x, y, z]`.
@@ -326,6 +362,7 @@ EMSCRIPTEN_BINDINGS(kinematics_module) {
         .function("jacobian", &RobotHandle::jacobian)
         .function("manipulability", &RobotHandle::manipulability)
         .function("manipulabilityEllipsoids", &RobotHandle::manipulabilityEllipsoids)
+        .function("collisionBody", &RobotHandle::collisionBody)
         .function("inverse", &RobotHandle::inverse);
 
     emscripten::function("availableRobots", &available_robots);

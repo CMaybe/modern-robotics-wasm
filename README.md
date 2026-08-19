@@ -55,6 +55,7 @@ If you use VS Code, **Reopen in Container** with `.devcontainer/devcontainer.jso
 | Presets buttons | Jump to representative poses (including singular ones) |
 | Show joint rotation axes | Toggle each joint's rotation axis (cyan arrows) |
 | Manipulability ellipsoid | Ellipsoid drawn at the EE — Linear / Angular / Off |
+| Collision capsules | Toggle the capsule collision body — turns red on self-collision, tightest clearance shown in mm |
 | IK solver buttons | Switch between Box QP and DLS + clamp — compare while dragging |
 | Robot buttons | Switch between UR5 (6 DOF) and FR3 (7 DOF) |
 | Display buttons | Switch between Meshes (real manufacturer meshes) and Schematic (link/joint diagram) |
@@ -75,6 +76,9 @@ cpp/
     core/dh.hpp                 # Modified (Craig) DH row → Pose
     kinematics/serial_chain.hpp # SerialChain<Dof> — FK · link frames · joint axes · Jacobian
     kinematics/manipulability.hpp
+    collision/shapes.hpp        # Sphere · Capsule + analytic signed distances
+    collision/robot_geometry.hpp # link-attached capsules, derived from the chain's frames
+    collision/world.hpp         # obstacle world + self/obstacle contact queries
     solvers/box_qp.hpp          # box-constrained QP (projected Gauss–Seidel)
     solvers/inverse_kinematics.hpp
     models/ur5.hpp              # UR5 (6 DOF)
@@ -83,11 +87,11 @@ cpp/
   src/robot.cpp                 # ChainRobot<Dof> adapter · catalog
   apps/demo/main.cpp            # Native example binary (for gdb debugging)
   bindings/wasm/bindings.cpp    # embind — Robot + createRobot() exposed to JS
-  tests/                        # 28 GoogleTest cases (chain · models · solvers · registry)
+  tests/                        # GoogleTest suite (chain · models · collision · solvers · registry)
 web/
   src/kinematics/               # WASM loader + TypeScript types + URDF asset mapping
   src/components/               # RobotViewer · JointSliders · PoseReadout
-  e2e/viewer.spec.ts            # 7 Playwright browser tests
+  e2e/viewer.spec.ts            # Playwright browser tests
   public/wasm/                  # Build outputs (gitignored)
   public/robots/                # Manufacturer URDFs + meshes (fetch_meshes.sh, gitignored)
 docker/                         # Dockerfile · build.sh · run.sh · docker-compose.yml
@@ -131,7 +135,7 @@ All of these run inside the container (`docker/run.sh <script>`).
 
 ```sh
 docker/run.sh scripts/ci.sh            # full check suite (same as CI)
-docker/run.sh scripts/test.sh          # C++ 28/28 passing
+docker/run.sh scripts/test.sh          # run the C++ unit tests
 docker/run.sh node scripts/smoke_wasm.cjs
 ```
 
@@ -357,7 +361,7 @@ straight into `THREE.Matrix4.fromArray()`.
 
 ```
 $ docker/run.sh scripts/test.sh
-100% tests passed, 0 tests failed out of 28
+100% tests passed, 0 tests failed out of 48
 ```
 
 The tests are split across four files.
@@ -377,7 +381,7 @@ Tests that pin down specific values:
 - **The linear ellipsoid actually contains tool velocities sampled via numerical differentiation**
 - **The QP step's model cost ≤ the clamped DLS step's** (strictly smaller when constrained)
 
-Browser behavior is covered by 7 Playwright tests in `web/e2e/viewer.spec.ts` —
+Browser behavior is covered by the Playwright tests in `web/e2e/viewer.spec.ts` —
 WASM loading · WebGL context · reproducing the textbook values · slider FK · DOF/limits on robot
 switch · ellipsoid collapse at singularities · IK method switching · **HiDPI layout overflow**.
 They pass in schematic mode without meshes, so they don't depend on third-party downloads.
@@ -394,8 +398,8 @@ Docker image and calls the scripts, so CI can be reproduced locally as-is with
 
 | Job | Contents |
 | --- | --- |
-| `checks` | `scripts/ci.sh` — clang-format · 28 C++ tests · WASM build + binding smoke test · TS typecheck · production build |
-| `e2e` | `scripts/e2e.sh` — 7 Playwright browser tests |
+| `checks` | `scripts/ci.sh` — clang-format · the C++ tests · WASM build + binding smoke test · TS typecheck · production build |
+| `e2e` | `scripts/e2e.sh` — the Playwright browser tests |
 
 - The image is cached with the GitHub Actions layer cache (`type=gha`).
   The full cost is only paid when the Dockerfile changes.

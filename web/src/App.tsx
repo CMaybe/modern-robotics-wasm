@@ -27,6 +27,7 @@ export default function App() {
 
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
   const [showJointAxes, setShowJointAxes] = useState(true);
+  const [showCollision, setShowCollision] = useState(false);
   const [ellipsoidMode, setEllipsoidMode] = useState<EllipsoidMode>("linear");
   const [displayMode, setDisplayMode] = useState<DisplayMode>("mesh");
   const [meshStatus, setMeshStatus] = useState<MeshStatus>({ state: "loading" });
@@ -71,6 +72,15 @@ export default function App() {
       ? { label: "linear", unit: "m/rad", data }
       : { label: "angular", unit: "rad/rad", data };
   }, [arm, jointAngles, ellipsoidMode]);
+
+  // Only queried while the overlay is on; the viewer polls the same call per frame.
+  const selfContact = useMemo(
+    () =>
+      arm && showCollision && jointAngles.length === arm.dof()
+        ? arm.collisionBody(jointAngles).selfContact
+        : null,
+    [arm, jointAngles, showCollision],
+  );
 
   const meshStatusHint = useMemo(() => {
     switch (meshStatus.state) {
@@ -123,6 +133,7 @@ export default function App() {
           onIkResult={handleIkResult}
           gizmoMode={gizmoMode}
           showJointAxes={showJointAxes}
+          showCollision={showCollision}
           ellipsoidMode={ellipsoidMode}
           displayMode={displayMode}
           onMeshStatus={handleMeshStatus}
@@ -165,6 +176,23 @@ export default function App() {
               </button>
             </div>
             <p className="hint">{meshStatusHint}</p>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={showCollision}
+                onChange={(event) => setShowCollision(event.target.checked)}
+              />
+              Collision capsules
+            </label>
+            {selfContact && (
+              <p className="hint" data-testid="self-clearance">
+                {!Number.isFinite(selfContact.distance)
+                  ? "No self-collision pairs to check."
+                  : selfContact.distance <= 0
+                    ? `Self-collision: ${(-selfContact.distance * 1000).toFixed(1)} mm penetration.`
+                    : `Tightest self-clearance: ${(selfContact.distance * 1000).toFixed(1)} mm.`}
+              </p>
+            )}
           </section>
 
           <section className="panel__section">

@@ -42,6 +42,7 @@ Makefile
 
 # IDE
 .idea/
+.vscode/
 *.iml
 *.swp
 .DS_Store

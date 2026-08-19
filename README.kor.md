@@ -54,6 +54,7 @@ VS Code를 쓴다면 `.devcontainer/devcontainer.json` 으로 **Reopen in Contai
 | Presets 버튼 | 대표 자세로 점프 (특이점 자세 포함) |
 | Show joint rotation axes | 각 관절의 회전축(청록 화살표) 표시 토글 |
 | Manipulability ellipsoid | EE에 그려지는 조작성 타원체 — Linear / Angular / Off |
+| Collision capsules | 충돌 모델(캡슐) 오버레이 토글 — 자기충돌 시 빨간색으로 표시, 최소 여유가 mm로 표시됨 |
 | IK solver 버튼 | Box QP / DLS + clamp 전환 — 드래그하며 차이를 비교 |
 | Robot 버튼 | UR5 (6 DOF) / FR3 (7 DOF) 전환 |
 | Display 버튼 | Meshes (제조사 실제 메시) / Schematic (링크·조인트 도식) 전환 |
@@ -73,6 +74,9 @@ cpp/
     core/dh.hpp                 # 수정(Craig) DH 행 → Pose
     kinematics/serial_chain.hpp # SerialChain<Dof> — FK · 링크 프레임 · 관절축 · Jacobian
     kinematics/manipulability.hpp
+    collision/shapes.hpp        # Sphere · Capsule + 해석적 signed distance
+    collision/robot_geometry.hpp # 링크에 붙는 캡슐 — 체인 프레임에서 자동 유도
+    collision/world.hpp         # 장애물 월드 + 자기/장애물 충돌 쿼리
     solvers/box_qp.hpp          # box 제약 QP (projected Gauss–Seidel)
     solvers/inverse_kinematics.hpp
     models/ur5.hpp              # UR5 (6 DOF)
@@ -81,11 +85,11 @@ cpp/
   src/robot.cpp                 # ChainRobot<Dof> 어댑터 · 카탈로그
   apps/demo/main.cpp            # 네이티브 실행 예제 (gdb 디버깅용)
   bindings/wasm/bindings.cpp    # embind — JS에 노출되는 Robot + createRobot()
-  tests/                        # GoogleTest 28종 (chain · models · solvers · registry)
+  tests/                        # GoogleTest 스위트 (chain · models · collision · solvers · registry)
 web/
   src/kinematics/               # WASM 로더 + TypeScript 타입 + URDF 자산 매핑
   src/components/               # RobotViewer · JointSliders · PoseReadout
-  e2e/viewer.spec.ts            # Playwright 브라우저 테스트 7종
+  e2e/viewer.spec.ts            # Playwright 브라우저 테스트
   public/wasm/                  # 빌드 산출물 (git 제외)
   public/robots/                # 제조사 URDF + 메시 (fetch_meshes.sh, git 제외)
 docker/                         # Dockerfile · build.sh · run.sh · docker-compose.yml
@@ -129,7 +133,7 @@ C++20 기준이며, `.clang-format` 과 `.clang-tidy` 가 기계적으로 강제
 
 ```sh
 docker/run.sh scripts/ci.sh            # 전체 검사 (CI와 동일)
-docker/run.sh scripts/test.sh          # C++ 28/28 통과
+docker/run.sh scripts/test.sh          # C++ 단위 테스트 실행
 docker/run.sh node scripts/smoke_wasm.cjs
 ```
 
@@ -335,7 +339,7 @@ arm.delete();                 // embind 객체는 GC되지 않음
 
 ```
 $ docker/run.sh scripts/test.sh
-100% tests passed, 0 tests failed out of 28
+100% tests passed, 0 tests failed out of 48
 ```
 
 테스트는 네 파일로 나뉩니다.
@@ -355,7 +359,7 @@ $ docker/run.sh scripts/test.sh
 - **선속도 타원체가 수치미분으로 샘플링한 툴 속도를 실제로 포함**
 - **QP 스텝의 모델 비용 ≤ 클램프된 DLS 스텝** (제약 상황에서는 엄격히 작음)
 
-브라우저 동작은 `web/e2e/viewer.spec.ts` 의 Playwright 테스트 7종이 확인합니다 —
+브라우저 동작은 `web/e2e/viewer.spec.ts` 의 Playwright 테스트가 확인합니다 —
 WASM 로드 · WebGL 컨텍스트 · 교재 값 재현 · 슬라이더 FK · 로봇 전환 시 DOF/리밋 ·
 특이점 타원체 붕괴 · IK 방식 전환 · **HiDPI 레이아웃 오버플로**.
 메시가 없어도 도식 모드로 통과하므로 서드파티 다운로드에 의존하지 않습니다.
@@ -372,8 +376,8 @@ WASM 바인딩은 `scripts/smoke_wasm.cjs` 로 Node에서 동일한 항목을 �
 
 | 잡 | 내용 |
 | --- | --- |
-| `checks` | `scripts/ci.sh` — clang-format · C++ 28종 · WASM 빌드 + 바인딩 스모크 · TS 타입체크 · 프로덕션 빌드 |
-| `e2e` | `scripts/e2e.sh` — Playwright 브라우저 테스트 7종 |
+| `checks` | `scripts/ci.sh` — clang-format · C++ 테스트 · WASM 빌드 + 바인딩 스모크 · TS 타입체크 · 프로덕션 빌드 |
+| `e2e` | `scripts/e2e.sh` — Playwright 브라우저 테스트 |
 
 - 이미지는 GitHub Actions 레이어 캐시(`type=gha`)로 캐싱합니다.
   Dockerfile이 바뀔 때만 전체 비용을 냅니다.

@@ -50,6 +50,36 @@ export interface ManipulabilityEllipsoids {
   angular: Ellipsoid;
 }
 
+/** One capsule of the robot's collision body, posed in the space frame. */
+export interface CollisionCapsule {
+  /** Axis start, `[x, y, z]` in metres. */
+  start: [number, number, number];
+  /** Axis end, `[x, y, z]` in metres. */
+  end: [number, number, number];
+  /** Metres. */
+  radius: number;
+  /** Link the capsule rides on. */
+  link: number;
+}
+
+/** The closest approach a collision query found. */
+export interface CollisionContact {
+  /** Signed clearance in metres: negative = penetration, Infinity = nothing checked. */
+  distance: number;
+  /** Robot link involved, or -1 when nothing was checked. */
+  link: number;
+  /** Witness point on the involved capsule's axis, space frame. */
+  point: [number, number, number];
+  /** Direction of increasing clearance, unit length. */
+  normal: [number, number, number];
+}
+
+/** The collision body at one configuration, plus its tightest self pair. */
+export interface CollisionBody {
+  capsules: CollisionCapsule[];
+  selfContact: CollisionContact;
+}
+
 /**
  * How each IK iteration turns the task error into a joint-space step.
  *
@@ -109,6 +139,8 @@ export interface Robot {
   jacobian(angles: number[]): number[];
   manipulability(angles: number[]): number;
   manipulabilityEllipsoids(angles: number[]): ManipulabilityEllipsoids;
+  /** The collision capsules posed at `angles`, plus the tightest self-collision pair. */
+  collisionBody(angles: number[]): CollisionBody;
   inverse(
     initialGuess: number[],
     position: number[],

@@ -54,7 +54,8 @@ VS Code를 쓴다면 `.devcontainer/devcontainer.json` 으로 **Reopen in Contai
 | Presets 버튼 | 대표 자세로 점프 (특이점 자세 포함) |
 | Show joint rotation axes | 각 관절의 회전축(청록 화살표) 표시 토글 |
 | Manipulability ellipsoid | EE에 그려지는 조작성 타원체 — Linear / Angular / Off |
-| Collision capsules | 충돌 모델(캡슐) 오버레이 토글 — 자기충돌 시 빨간색으로 표시, 최소 여유가 mm로 표시됨 |
+| Collision capsules | 충돌 모델(캡슐) 오버레이 토글 — 충돌 시 빨간색으로 표시, 최소 여유가 mm로 표시됨 |
+| Motion planning | 구 장애물 추가·드래그, 목표 자세 저장, RRT-Connect로 계획, 결과 재생 |
 | IK solver 버튼 | Box QP / DLS + clamp 전환 — 드래그하며 차이를 비교 |
 | Robot 버튼 | UR5 (6 DOF) / FR3 (7 DOF) 전환 |
 | Display 버튼 | Meshes (제조사 실제 메시) / Schematic (링크·조인트 도식) 전환 |
@@ -77,6 +78,7 @@ cpp/
     collision/shapes.hpp        # Sphere · Capsule + 해석적 signed distance
     collision/robot_geometry.hpp # 링크에 붙는 캡슐 — 체인 프레임에서 자동 유도
     collision/world.hpp         # 장애물 월드 + 자기/장애물 충돌 쿼리
+    planning/rrt_connect.hpp    # RRT-Connect + shortcut 스무딩 (관절 공간)
     solvers/box_qp.hpp          # box 제약 QP (projected Gauss–Seidel)
     solvers/inverse_kinematics.hpp
     models/ur5.hpp              # UR5 (6 DOF)
@@ -288,6 +290,44 @@ $$T_i(\theta) = e^{[\mathcal{S}_0]\theta_0} \cdots e^{[\mathcal{S}_i]\theta_i} M
 
 ---
 
+## 모션 플래닝
+
+### 충돌 모델
+
+각 링크는 연속한 관절 프레임 원점을 잇는 **캡슐**입니다 — 도식(schematic) 모드가 그리는 골격과
+같은 구조이고, 반경은 제조사 메시를 감싸도록 패딩했습니다 (`ur5_collision()`, `fr3_collision()`).
+캡슐–캡슐 · 캡슐–구 거리는 해석적으로 계산되며, 모든 쿼리는 불리언이 아니라 **부호 있는 거리**와
+위트니스 점 · 법선을 반환합니다: 샘플링 플래너는 부호를 쓰고, 이후의 최적화 기반 플래너는
+그래디언트를 쓸 수 있습니다. 구조상 간격이 닫힐 수 없는 쌍(UR5 손목 오프셋, FR3 팔꿈치·손목
+오프셋)은 SRDF가 인접 링크를 비활성화하듯 자기충돌 검사에서 제외했습니다.
+
+### RRT-Connect + shortcut (`planning/rrt_connect.hpp`)
+
+`plan_rrt_connect()` 는 관절 공간에서 시작과 목표 양쪽에 트리를 키웁니다 (Kuffner & LaValle, 2000).
+매 반복마다 한 트리가 균일 샘플 방향으로 `step` 한 걸음 확장하고, 반대 트리는 새 정점을 향해
+막히거나 도달할 때까지 **탐욕적으로** 연결을 시도하며, 역할은 매 반복 교대됩니다. 모든 엣지는
+`resolution` 라디안 간격으로 샘플링해 `margin` 여유를 지키는지 캡슐 모델로 검증합니다.
+
+샘플링의 대가로 원시 경로는 삐죽삐죽하므로 **shortcut 패스**가 뒤따릅니다: 무작위 웨이포인트 쌍을
+골라 직선 구간이 충돌 없으면 사이를 지웁니다. 뷰어는 두 EE 궤적을 함께 그려(어두운 쪽: 원시,
+밝은 쪽: shortcut) 차이를 눈으로 확인할 수 있습니다.
+
+설계 노트:
+
+- **결정적입니다.** 샘플러는 `std::uniform_real_distribution`(구현 정의) 대신 xorshift에서 가수
+  24비트를 직접 뽑으므로, 같은 시드는 네이티브와 WebAssembly에서 같은 경로를 재현합니다.
+  테스트가 이 성질에 의존합니다.
+- **실패에 타입이 있습니다.** `Status::{kStartInvalid, kGoalInvalid, kNotFound}` 로 UI가 "팔을
+  옮기세요 / 목표를 다시 잡으세요 / 장애물을 줄이세요"를 구분해 안내합니다.
+- **테스트 장애물은 추측이 아니라 측정으로 배치했습니다.** 후보 위치를 수치 스캔해서 양 끝
+  자세는 실제 여유를 유지하고 직선 스윕은 깊게 관통하는 위치를 골랐습니다 — 플래너가 우회해야만
+  통과하는 구성입니다.
+
+뷰어에서는 **Add obstacle** 로 드래그 가능한 구를 놓고, **Set goal = current** 로 목표를 저장한 뒤,
+**Plan path** 가 현재 자세에서 계획을 실행하고, 찾은 경로는 일정한 관절 속도로 재생됩니다.
+
+---
+
 ## JS ↔ WASM 인터페이스
 
 `cpp/wasm/bindings.cpp` 의 embind 바인딩이며, TypeScript 선언은
@@ -326,6 +366,14 @@ arm.jacobian(angles);         // 6 x DOF, row-major, [v; w] 순서
 // 조작성 타원체 — 단위구에 quaternion을 적용하고 radii로 스케일하면 그대로 타원체가 됩니다
 const { linear, angular } = arm.manipulabilityEllipsoids(angles);
 // linear.quaternion [x,y,z,w] · linear.radii [a,b,c] · linear.volume · linear.isotropy
+
+// 충돌 + 모션 플래닝
+const world = { spheres: [{ center: [0.5, 0, 0.4], radius: 0.12 }] };
+arm.collisionBody(angles);            // 캡슐 포즈 + 가장 가까운 자기충돌 접촉
+arm.nearestContact(angles, world);    // 장애물·자기충돌 포함 부호 있는 여유
+const plan = arm.plan(startAngles, goalAngles, world, { seed: 7 });
+// plan.status ("success" | "start_invalid" | "goal_invalid" | "not_found")
+// plan.path · rawPath · iterations · nodes · pathLength · rawLength
 
 arm.delete();                 // embind 객체는 GC되지 않음
 ```

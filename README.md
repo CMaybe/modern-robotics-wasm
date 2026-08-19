@@ -55,7 +55,8 @@ If you use VS Code, **Reopen in Container** with `.devcontainer/devcontainer.jso
 | Presets buttons | Jump to representative poses (including singular ones) |
 | Show joint rotation axes | Toggle each joint's rotation axis (cyan arrows) |
 | Manipulability ellipsoid | Ellipsoid drawn at the EE — Linear / Angular / Off |
-| Collision capsules | Toggle the capsule collision body — turns red on self-collision, tightest clearance shown in mm |
+| Collision capsules | Toggle the capsule collision body — turns red on any collision, tightest clearance shown in mm |
+| Motion planning | Add/drag sphere obstacles, store a goal pose, plan with RRT-Connect, replay the result |
 | IK solver buttons | Switch between Box QP and DLS + clamp — compare while dragging |
 | Robot buttons | Switch between UR5 (6 DOF) and FR3 (7 DOF) |
 | Display buttons | Switch between Meshes (real manufacturer meshes) and Schematic (link/joint diagram) |
@@ -79,6 +80,7 @@ cpp/
     collision/shapes.hpp        # Sphere · Capsule + analytic signed distances
     collision/robot_geometry.hpp # link-attached capsules, derived from the chain's frames
     collision/world.hpp         # obstacle world + self/obstacle contact queries
+    planning/rrt_connect.hpp    # RRT-Connect + shortcut smoothing (joint space)
     solvers/box_qp.hpp          # box-constrained QP (projected Gauss–Seidel)
     solvers/inverse_kinematics.hpp
     models/ur5.hpp              # UR5 (6 DOF)
@@ -309,6 +311,47 @@ each joint's current rotation axis. Every coordinate in the viewer comes from he
 
 ---
 
+## Motion planning
+
+### Collision model
+
+Each link is a **capsule** spanning consecutive joint-frame origins — the same skeleton the
+schematic mode draws — with radii padded to enclose the vendor meshes (`ur5_collision()`,
+`fr3_collision()`). Capsule–capsule and capsule–sphere distances are analytic, and every query
+returns a **signed distance** together with a witness point and normal: sampling planners consume
+the sign, and an optimisation-based planner can later consume the gradient. Pairs whose gap is
+fixed by construction (the UR5 wrist offsets, the FR3 elbow and wrist offsets) are excluded from
+self-collision checks, the way an SRDF disables pairs that touch by design.
+
+### RRT-Connect + shortcut (`planning/rrt_connect.hpp`)
+
+`plan_rrt_connect()` grows two trees in joint space, one from the start and one from the goal
+(Kuffner & LaValle, 2000). Each iteration extends one tree a single `step` toward a uniform sample,
+then the other tree extends **greedily** toward the new vertex until it reaches it or is trapped;
+the roles swap every iteration. Every edge is validated by sampling it each `resolution` radians
+against the capsule model with `margin` of required clearance.
+
+The raw path is jagged — the price of sampling — so a **shortcut pass** follows: random waypoint
+pairs are joined by a straight segment whenever that segment is collision-free. The viewer draws
+both end-effector traces (dim: raw, bright: shortcut) so the difference stays visible.
+
+Design notes:
+
+- **Deterministic.** The sampler draws 24 explicit mantissa bits from a xorshift generator instead
+  of `std::uniform_real_distribution` (whose output is implementation-defined), so the same seed
+  reproduces the same path natively and under WebAssembly; the tests rely on that.
+- **Failure is typed.** `Status::{kStartInvalid, kGoalInvalid, kNotFound}` lets the UI say whether
+  to move the arm, re-set the goal, or relax the obstacles, instead of a bare "failed".
+- **Test obstacles are probed, not guessed.** The unit-test spheres were placed by numerically
+  scanning candidate positions so both endpoints keep real clearance while the straight-line sweep
+  penetrates deeply — the planner must detour to pass.
+
+In the viewer: **Add obstacle** drops a draggable sphere, **Set goal = current** stores the goal,
+**Plan path** runs the planner from the current pose, and a found path replays at constant
+joint-space speed.
+
+---
+
 ## JS ↔ WASM interface
 
 The embind bindings live in `cpp/wasm/bindings.cpp`; the TypeScript declarations are in
@@ -348,6 +391,14 @@ arm.jacobian(angles);         // 6 x DOF, row-major, [v; w] order
 // Manipulability ellipsoids — apply the quaternion to a unit sphere and scale by radii
 const { linear, angular } = arm.manipulabilityEllipsoids(angles);
 // linear.quaternion [x,y,z,w] · linear.radii [a,b,c] · linear.volume · linear.isotropy
+
+// Collision + motion planning
+const world = { spheres: [{ center: [0.5, 0, 0.4], radius: 0.12 }] };
+arm.collisionBody(angles);            // posed capsules + tightest self contact
+arm.nearestContact(angles, world);    // signed clearance, obstacles and self both
+const plan = arm.plan(startAngles, goalAngles, world, { seed: 7 });
+// plan.status ("success" | "start_invalid" | "goal_invalid" | "not_found")
+// plan.path · rawPath · iterations · nodes · pathLength · rawLength
 
 arm.delete();                 // embind objects are not garbage collected
 ```

@@ -4,9 +4,22 @@ import { OrbitControls, TransformControls } from "three-stdlib";
 import URDFLoader, { type URDFRobot } from "urdf-loader";
 
 import { ROBOT_ASSETS } from "../kinematics/robotAssets";
-import type { IkOptions, IkResult, Robot } from "../kinematics/types";
+import type { IkOptions, IkResult, ObstacleWorld, Robot, SphereObstacle } from "../kinematics/types";
 
 export type GizmoMode = "translate" | "rotate";
+
+/** A sphere obstacle with the identity the UI tracks selection by. */
+export interface ViewerObstacle extends SphereObstacle {
+  id: number;
+}
+
+/** End-effector traces of the planner's output, as joint-space waypoint lists. */
+export interface PlannedPathTraces {
+  /** The shortcut path the arm will replay. */
+  smoothed: number[][];
+  /** The raw RRT-Connect path, drawn dimmer for comparison. */
+  raw: number[][];
+}
 
 /** Vendor meshes from the official URDF, or the abstract link/joint skeleton. */
 export type DisplayMode = "mesh" | "schematic";
@@ -35,8 +48,16 @@ export interface RobotViewerProps {
   gizmoMode: GizmoMode;
   /** Draws a coloured arrow along every joint's rotation axis. */
   showJointAxes: boolean;
-  /** Overlays the collision capsules; they turn red on a self-collision. */
+  /** Overlays the collision capsules; they turn red on any collision. */
   showCollision: boolean;
+  /** Sphere obstacles to draw; they also feed the capsule colouring. */
+  obstacles: ViewerObstacle[];
+  /** Obstacle carrying the drag gizmo, or null. */
+  selectedObstacleId: number | null;
+  /** Called while an obstacle is dragged to its new centre. */
+  onObstacleMoved: (id: number, center: [number, number, number]) => void;
+  /** End-effector traces of the last plan, or null to hide them. */
+  plannedPaths: PlannedPathTraces | null;
   /** Which manipulability ellipsoid to overlay on the end-effector. */
   ellipsoidMode: EllipsoidMode;
   /** Whether to draw the vendor meshes or the schematic skeleton. */
@@ -61,6 +82,10 @@ const COLOR_ELLIPSOID_LINEAR = 0x4d9dff;
 const COLOR_ELLIPSOID_ANGULAR = 0xc46dff;
 const COLOR_COLLISION_CLEAR = 0x59c96b;
 const COLOR_COLLISION_HIT = 0xff4d5e;
+const COLOR_OBSTACLE = 0xcc8844;
+const COLOR_OBSTACLE_SELECTED = 0xffaa55;
+const COLOR_PATH_SMOOTHED = 0xffd166;
+const COLOR_PATH_RAW = 0x8899aa;
 
 /**
  * Metres drawn per unit of ellipsoid radius. The linear block is in m/rad and
@@ -104,6 +129,10 @@ export default function RobotViewer({
   gizmoMode,
   showJointAxes,
   showCollision,
+  obstacles,
+  selectedObstacleId,
+  onObstacleMoved,
+  plannedPaths,
   ellipsoidMode,
   displayMode,
   onMeshStatus,
@@ -133,6 +162,13 @@ export default function RobotViewer({
   const showCollisionRef = useRef(showCollision);
   const setShowCollisionRef = useRef<((show: boolean) => void) | null>(null);
   showCollisionRef.current = showCollision;
+  const worldRef = useRef<ObstacleWorld>({ spheres: [] });
+  worldRef.current = { spheres: obstacles.map(({ center, radius }) => ({ center, radius })) };
+  const onObstacleMovedRef = useRef(onObstacleMoved);
+  onObstacleMovedRef.current = onObstacleMoved;
+  const syncObstaclesRef = useRef<((list: ViewerObstacle[], selectedId: number | null) => void) | null>(null);
+  const syncPlannedPathsRef = useRef<((paths: PlannedPathTraces | null) => void) | null>(null);
+  const obstacleDraggingRef = useRef(false);
   const onMeshStatusRef = useRef(onMeshStatus);
   onMeshStatusRef.current = onMeshStatus;
   const displayModeRef = useRef(displayMode);
@@ -331,6 +367,146 @@ export default function RobotViewer({
       collisionGroup.visible = show;
     };
 
+    // ---- Obstacles ---------------------------------------------------------
+    // Spheres the planner must avoid. The selected one carries its own drag
+    // gizmo; positions flow up through onObstacleMoved and back down as props.
+    const obstacleGroup = new THREE.Group();
+    scene.add(obstacleGroup);
+    const obstacleGeometry = new THREE.SphereGeometry(1, 28, 20);
+    const obstacleMeshes = new Map<number, THREE.Mesh>();
+
+    const obstacleControls = new TransformControls(camera, renderer.domElement);
+    obstacleControls.setMode("translate");
+    obstacleControls.setSize(0.7);
+    const obstacleGizmoHelper =
+      (obstacleControls as unknown as { getHelper?: () => THREE.Object3D }).getHelper?.() ??
+      (obstacleControls as unknown as THREE.Object3D);
+    scene.add(obstacleGizmoHelper);
+    obstacleGizmoHelper.visible = false;
+
+    const handleObstacleDragChanged = (event: { value: boolean }) => {
+      obstacleDraggingRef.current = event.value;
+      orbitControls.enabled = !event.value;
+    };
+    // three-stdlib keeps TransformControls.object private, so the attachment is
+    // mirrored here.
+    let attachedObstacle: THREE.Mesh | null = null;
+
+    const handleObstacleChange = () => {
+      if (!obstacleDraggingRef.current) {
+        return;
+      }
+      const attached = attachedObstacle;
+      if (attached) {
+        onObstacleMovedRef.current(attached.userData.obstacleId as number, [
+          attached.position.x,
+          attached.position.y,
+          attached.position.z,
+        ]);
+      }
+    };
+    const obstacleEvents = obstacleControls as unknown as GizmoEventSource;
+    obstacleEvents.addEventListener("dragging-changed", handleObstacleDragChanged);
+    obstacleEvents.addEventListener("objectChange", handleObstacleChange);
+
+    const syncObstacles = (list: ViewerObstacle[], selectedId: number | null) => {
+      for (const [id, mesh] of Array.from(obstacleMeshes)) {
+        if (!list.some((obstacle) => obstacle.id === id)) {
+          if (attachedObstacle === mesh) {
+            obstacleControls.detach();
+            attachedObstacle = null;
+          }
+          obstacleGroup.remove(mesh);
+          (mesh.material as THREE.Material).dispose();
+          obstacleMeshes.delete(id);
+        }
+      }
+      for (const obstacle of list) {
+        let mesh = obstacleMeshes.get(obstacle.id);
+        if (!mesh) {
+          mesh = new THREE.Mesh(
+            obstacleGeometry,
+            new THREE.MeshStandardMaterial({
+              color: COLOR_OBSTACLE,
+              roughness: 0.6,
+              metalness: 0.1,
+              transparent: true,
+              opacity: 0.85,
+            }),
+          );
+          mesh.userData.obstacleId = obstacle.id;
+          obstacleGroup.add(mesh);
+          obstacleMeshes.set(obstacle.id, mesh);
+        }
+        // While the pointer owns a mesh, its position is the source of truth; the
+        // state round trip would lag one frame behind and fight the drag.
+        if (!(obstacleDraggingRef.current && attachedObstacle === mesh)) {
+          mesh.position.set(obstacle.center[0], obstacle.center[1], obstacle.center[2]);
+        }
+        mesh.scale.setScalar(obstacle.radius);
+        (mesh.material as THREE.MeshStandardMaterial).color.setHex(
+          obstacle.id === selectedId ? COLOR_OBSTACLE_SELECTED : COLOR_OBSTACLE,
+        );
+      }
+      const selected = selectedId !== null ? obstacleMeshes.get(selectedId) : undefined;
+      if (selected) {
+        if (attachedObstacle !== selected) {
+          obstacleControls.attach(selected);
+          attachedObstacle = selected;
+        }
+      } else {
+        obstacleControls.detach();
+        attachedObstacle = null;
+      }
+      obstacleGizmoHelper.visible = Boolean(selected);
+    };
+    syncObstaclesRef.current = syncObstacles;
+
+    // ---- Planned-path traces ------------------------------------------------
+    // Joint-linear segments curve in task space, so each one is sampled before
+    // running it through forward(); the polyline then hugs the true EE motion.
+    const tracePoints = (path: number[][]) => {
+      const points: THREE.Vector3[] = [];
+      points.push(new THREE.Vector3().fromArray(arm.forward(path[0]).position));
+      for (let i = 1; i < path.length; i += 1) {
+        const previous = path[i - 1];
+        const next = path[i];
+        const distance = Math.hypot(...next.map((value, j) => value - previous[j]));
+        const steps = Math.max(1, Math.ceil(distance / 0.08));
+        for (let s = 1; s <= steps; s += 1) {
+          const t = s / steps;
+          const sample = previous.map((value, j) => value + t * (next[j] - value));
+          points.push(new THREE.Vector3().fromArray(arm.forward(sample).position));
+        }
+      }
+      return points;
+    };
+
+    const makePathLine = (color: number, opacity: number) => {
+      const line = new THREE.Line(
+        new THREE.BufferGeometry(),
+        new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthTest: false }),
+      );
+      line.renderOrder = 2;
+      line.visible = false;
+      scene.add(line);
+      return line;
+    };
+    const rawPathLine = makePathLine(COLOR_PATH_RAW, 0.45);
+    const smoothedPathLine = makePathLine(COLOR_PATH_SMOOTHED, 0.9);
+
+    const syncPlannedPaths = (paths: PlannedPathTraces | null) => {
+      const apply = (line: THREE.Line, path: number[][] | undefined) => {
+        const points = path && path.length > 1 ? tracePoints(path) : [];
+        line.geometry.dispose();
+        line.geometry = new THREE.BufferGeometry().setFromPoints(points);
+        line.visible = points.length > 1;
+      };
+      apply(rawPathLine, paths?.raw);
+      apply(smoothedPathLine, paths?.smoothed);
+    };
+    syncPlannedPathsRef.current = syncPlannedPaths;
+
     // ---- Vendor meshes ---------------------------------------------------
     // The URDF chain and the C++ PoE model describe the same robot, so the meshes
     // need no alignment offsets: feeding the solver's joint angles into the URDF
@@ -497,11 +673,13 @@ export default function RobotViewer({
           collisionMeshes[i].quaternion.setFromUnitVectors(CYLINDER_AXIS, direction.normalize());
         }
 
-        const colliding = body.selfContact.distance <= 0;
+        // Obstacles count too, so the capsules flag whatever the planner would.
+        const contact = arm.nearestContact(angles, worldRef.current);
+        const colliding = contact.distance <= 0;
         collisionMaterial.color.setHex(colliding ? COLOR_COLLISION_HIT : COLOR_COLLISION_CLEAR);
         contactMarker.visible = colliding;
         if (colliding) {
-          contactMarker.position.fromArray(body.selfContact.point);
+          contactMarker.position.fromArray(contact.point);
         }
       }
 
@@ -625,6 +803,23 @@ export default function RobotViewer({
       (contactMarker.material as THREE.Material).dispose();
       setShowCollisionRef.current = null;
 
+      obstacleEvents.removeEventListener("dragging-changed", handleObstacleDragChanged);
+      obstacleEvents.removeEventListener("objectChange", handleObstacleChange);
+      obstacleControls.detach();
+      obstacleControls.dispose();
+      scene.remove(obstacleGizmoHelper);
+      obstacleGeometry.dispose();
+      obstacleMeshes.forEach((mesh) => (mesh.material as THREE.Material).dispose());
+      obstacleMeshes.clear();
+      obstacleDraggingRef.current = false;
+      syncObstaclesRef.current = null;
+
+      for (const line of [rawPathLine, smoothedPathLine]) {
+        line.geometry.dispose();
+        (line.material as THREE.Material).dispose();
+      }
+      syncPlannedPathsRef.current = null;
+
       disposed = true;
       setDisplayModeRef.current = null;
       applyUrdfJointsRef.current = null;
@@ -692,6 +887,16 @@ export default function RobotViewer({
     setShowCollisionRef.current?.(showCollision);
     applyAnglesRef.current?.(jointAnglesRef.current);
   }, [arm, showCollision]);
+
+  // Obstacle changes recolour the capsules too, so redraw after syncing.
+  useEffect(() => {
+    syncObstaclesRef.current?.(obstacles, selectedObstacleId);
+    applyAnglesRef.current?.(jointAnglesRef.current);
+  }, [arm, obstacles, selectedObstacleId]);
+
+  useEffect(() => {
+    syncPlannedPathsRef.current?.(plannedPaths);
+  }, [arm, plannedPaths]);
 
   useEffect(() => {
     setDisplayModeRef.current?.(displayMode);

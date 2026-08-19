@@ -11,6 +11,7 @@
  * templated in C++, and `robotics::Robot` erases the joint count for this layer.
  */
 
+#include <cstdint>
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
 #include <memory>
@@ -121,6 +122,45 @@ using robotics::Scalar;
     object.set("volume", ellipsoid.volume);
     object.set("isotropy", ellipsoid.isotropy);
     return object;
+}
+
+/// Packs a collision contact as `{ distance, link, point, normal }`.
+[[nodiscard]] val from_contact(const robotics::collision::Contact& contact) {
+    val object = val::object();
+    object.set("distance", contact.distance);
+    object.set("link", contact.link);
+    object.set("point", from_vector3(contact.point));
+    object.set("normal", from_vector3(contact.normal));
+    return object;
+}
+
+/// Reads a `[x, y, z]` JS array; missing entries stay zero.
+[[nodiscard]] robotics::Vector3 to_vector3(const val& array) {
+    const std::vector<Scalar> values = emscripten::vecFromJSArray<Scalar>(array);
+    robotics::Vector3 vector = robotics::Vector3::Zero();
+    for (std::size_t i = 0; i < 3 && i < values.size(); ++i) {
+        vector(static_cast<Eigen::Index>(i)) = values[i];
+    }
+    return vector;
+}
+
+/// Rebuilds an obstacle world from `{ spheres: [{ center, radius }] }`; absent
+/// or malformed fields simply contribute nothing, matching the empty world.
+[[nodiscard]] robotics::collision::CollisionWorld to_world(const val& world) {
+    robotics::collision::CollisionWorld result;
+    if (world.isUndefined() || world.isNull()) {
+        return result;
+    }
+    const val spheres = world["spheres"];
+    if (spheres.isUndefined() || spheres.isNull()) {
+        return result;
+    }
+    const auto count = spheres["length"].as<int>();
+    for (int i = 0; i < count; ++i) {
+        const val entry = spheres[i];
+        result.spheres.push_back({to_vector3(entry["center"]), entry["radius"].as<Scalar>()});
+    }
+    return result;
 }
 
 /// Rebuilds a pose from a JS position array and a three.js-ordered quaternion array.
@@ -270,17 +310,82 @@ public:
             capsules.set(index++, entry);
         }
 
-        const robotics::collision::Contact contact = model_->self_contact(configuration);
-        val self = val::object();
-        self.set("distance", contact.distance);
-        self.set("link", contact.link);
-        self.set("point", from_vector3(contact.point));
-        self.set("normal", from_vector3(contact.normal));
-
         val result = val::object();
         result.set("capsules", capsules);
-        result.set("selfContact", self);
+        result.set("selfContact", from_contact(model_->self_contact(configuration)));
         return result;
+    }
+
+    /**
+     * @brief The tightest approach at `angles` — obstacles and self both.
+     * @param world Optional `{ spheres: [{ center, radius }] }` in the space frame.
+     */
+    [[nodiscard]] val nearestContact(const val& angles, const val& world) const {
+        return from_contact(model_->nearest_contact(joints(angles), to_world(world)));
+    }
+
+    /**
+     * @brief Plans a collision-free joint path with RRT-Connect + shortcutting.
+     *
+     * @param start Start joint angles; must be legal and clear of the obstacles.
+     * @param goal Goal joint angles, same requirements.
+     * @param world Optional `{ spheres: [{ center, radius }] }`.
+     * @param options Optional `{ maxIterations, step, resolution, margin, shortcutRounds, seed }`.
+     * @return `{ status, path, rawPath, iterations, nodes, pathLength, rawLength }`;
+     *         paths are arrays of joint vectors and lengths are radians of joint motion.
+     */
+    [[nodiscard]] val plan(const val& start, const val& goal, const val& world, const val& options) const {
+        const robotics::planning::Options settings{
+            .max_iterations = static_cast<int>(read_number(options, "maxIterations", 3000)),
+            .step = read_number(options, "step", Scalar{0.2}),
+            .resolution = read_number(options, "resolution", Scalar{0.05}),
+            .margin = read_number(options, "margin", Scalar{0.01}),
+            .shortcut_rounds = static_cast<int>(read_number(options, "shortcutRounds", 150)),
+            .seed = static_cast<std::uint32_t>(read_number(options, "seed", 2026)),
+        };
+
+        const robotics::DynamicPlanResult result = model_->plan(joints(start), joints(goal), to_world(world), settings);
+
+        const auto pack = [](const std::vector<Eigen::VectorXf>& path) {
+            val array = val::array();
+            int index = 0;
+            for (const auto& waypoint : path) {
+                array.set(index++, from_vector(waypoint));
+            }
+            return array;
+        };
+        const auto length = [](const std::vector<Eigen::VectorXf>& path) {
+            Scalar total{0};
+            for (std::size_t i = 1; i < path.size(); ++i) {
+                total += (path[i] - path[i - 1]).norm();
+            }
+            return total;
+        };
+
+        const char* status = "not_found";
+        switch (result.status) {
+            case robotics::planning::Status::kSuccess:
+                status = "success";
+                break;
+            case robotics::planning::Status::kStartInvalid:
+                status = "start_invalid";
+                break;
+            case robotics::planning::Status::kGoalInvalid:
+                status = "goal_invalid";
+                break;
+            case robotics::planning::Status::kNotFound:
+                break;
+        }
+
+        val object = val::object();
+        object.set("status", std::string{status});
+        object.set("path", pack(result.path));
+        object.set("rawPath", pack(result.raw_path));
+        object.set("iterations", result.iterations);
+        object.set("nodes", result.nodes);
+        object.set("pathLength", length(result.path));
+        object.set("rawLength", length(result.raw_path));
+        return object;
     }
 
     /**
@@ -363,6 +468,8 @@ EMSCRIPTEN_BINDINGS(kinematics_module) {
         .function("manipulability", &RobotHandle::manipulability)
         .function("manipulabilityEllipsoids", &RobotHandle::manipulabilityEllipsoids)
         .function("collisionBody", &RobotHandle::collisionBody)
+        .function("nearestContact", &RobotHandle::nearestContact)
+        .function("plan", &RobotHandle::plan)
         .function("inverse", &RobotHandle::inverse);
 
     emscripten::function("availableRobots", &available_robots);

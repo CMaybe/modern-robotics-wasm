@@ -96,6 +96,27 @@ public:
         return collision::self_contact(geometry_, collision_capsules(joints));
     }
 
+    [[nodiscard]] collision::Contact nearest_contact(const Eigen::VectorXf& joints,
+                                                     const collision::CollisionWorld& world) const override {
+        return collision::nearest_contact(chain_, geometry_, to_fixed(joints), world);
+    }
+
+    [[nodiscard]] DynamicPlanResult plan(const Eigen::VectorXf& start,
+                                         const Eigen::VectorXf& goal,
+                                         const collision::CollisionWorld& world,
+                                         const planning::Options& options) const override {
+        const planning::Result<Dof> result =
+            planning::plan_rrt_connect(chain_, geometry_, world, to_fixed(start), to_fixed(goal), options);
+
+        DynamicPlanResult dynamic;
+        dynamic.status = result.status;
+        dynamic.iterations = result.iterations;
+        dynamic.nodes = result.nodes;
+        dynamic.path.assign(result.path.begin(), result.path.end());
+        dynamic.raw_path.assign(result.raw_path.begin(), result.raw_path.end());
+        return dynamic;
+    }
+
 private:
     /// Truncates or zero-pads a runtime-sized vector to this arm's joint count.
     [[nodiscard]] static JointVector<Dof> to_fixed(const Eigen::VectorXf& joints) {

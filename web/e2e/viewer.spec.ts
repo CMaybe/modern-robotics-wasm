@@ -123,13 +123,31 @@ test.describe("viewer", () => {
     await page.getByLabel("Collision capsules").check();
 
     // The opening pose is legal, so the readout shows a positive clearance.
-    await expect(page.getByTestId("self-clearance")).toContainText("self-clearance");
+    await expect(page.getByTestId("clearance")).toContainText("clearance");
 
     // Elbow at 180 degrees folds the wrist into the base column; the capsule
     // model computed in C++ must call that a self-collision.
     await page.getByRole("button", { name: "Home", exact: true }).click();
     await setSlider(page, 2, 180);
-    await expect(page.getByTestId("self-clearance")).toContainText("Self-collision");
+    await expect(page.getByTestId("clearance")).toContainText("Collision:");
+  });
+
+  test("the planner finds a path and replays it to the goal", async ({ page }) => {
+    await waitForViewer(page);
+    await page.getByRole("button", { name: "Add obstacle", exact: true }).click();
+
+    // Store the Modern Robotics pose as the goal, return to Ready, and plan.
+    await page.getByRole("button", { name: "MR Example 4.5", exact: true }).click();
+    await page.getByRole("button", { name: "Set goal = current", exact: true }).click();
+    await page.getByRole("button", { name: "Ready", exact: true }).click();
+    await page.getByRole("button", { name: "Plan path", exact: true }).click();
+
+    await expect(page.getByTestId("plan-status")).toContainText("Path found");
+
+    // Replay drives the joints along the path; the readout must settle on the
+    // goal pose — the book values for theta = (0, -pi/2, 0, 0, pi/2, 0).
+    await expect(readoutRows(page).first()).toContainText("0.0947", { timeout: 15_000 });
+    await expect(readoutRows(page).first()).toContainText("0.9887");
   });
 
   test("both IK step rules are selectable", async ({ page }) => {

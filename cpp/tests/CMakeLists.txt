@@ -5,6 +5,7 @@ add_executable(robotics_tests
     test_serial_chain.cpp
     test_models.cpp
     test_collision.cpp
+    test_planning.cpp
     test_solvers.cpp
     test_robot_registry.cpp
 )

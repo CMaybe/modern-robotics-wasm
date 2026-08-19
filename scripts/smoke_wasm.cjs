@@ -171,6 +171,29 @@ async function main() {
   check("FR3 default configuration is the ready pose, not zeros",
     fr3.defaultConfiguration().some((angle) => Math.abs(angle) > 1e-6));
 
+  console.log("\nMotion planner:");
+  // The wall from the C++ tests: both endpoints clear it, the pan sweep does not.
+  const wall = { spheres: [{ center: [0.55, 0.0, 0.35], radius: 0.15 }] };
+  const planStart = [0.9, -1.1, 1.3, -0.2, 1.0, 0.0];
+  const planGoal = [-0.9, -1.1, 1.3, -0.2, 1.0, 0.0];
+  check("nearestContact sees the obstacle mid-sweep",
+    ur5.nearestContact([0.0, -1.1, 1.3, -0.2, 1.0, 0.0], wall).distance < 0);
+
+  const planned = ur5.plan(planStart, planGoal, wall, {});
+  check("UR5 plans around the blocking sphere", planned.status === "success",
+    `status=${planned.status} iterations=${planned.iterations}`);
+  check("plan endpoints match start and goal",
+    planned.path.length >= 2 &&
+    planned.path[0].every((v, i) => close(v, planStart[i], 1e-4)) &&
+    planned.path[planned.path.length - 1].every((v, i) => close(v, planGoal[i], 1e-4)));
+  const ur5Limits = ur5.jointLimits();
+  check("every waypoint respects the joint limits",
+    planned.path.every((q) => q.every((angle, i) => angle >= ur5Limits[i].lower - 1e-4 && angle <= ur5Limits[i].upper + 1e-4)));
+  check("shortcutting never lengthens the path", planned.pathLength <= planned.rawLength + 1e-4,
+    `${planned.pathLength} vs ${planned.rawLength}`);
+  check("an unreachable goal reports goal_invalid",
+    ur5.plan(planStart, [0, 0, Math.PI, 0, 0, 0], {}, {}).status === "goal_invalid");
+
   ur5.delete();
   fr3.delete();
 

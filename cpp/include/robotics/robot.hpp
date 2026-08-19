@@ -9,6 +9,7 @@
 #include "robotics/collision/world.hpp"
 #include "robotics/kinematics/manipulability.hpp"
 #include "robotics/kinematics/serial_chain.hpp"
+#include "robotics/planning/rrt_connect.hpp"
 #include "robotics/solvers/inverse_kinematics.hpp"
 
 namespace robotics {
@@ -17,6 +18,15 @@ namespace robotics {
 struct RobotPreset {
     std::string label;
     Eigen::VectorXf joints;
+};
+
+/// Motion-planning result with runtime-sized waypoints.
+struct DynamicPlanResult {
+    planning::Status status{planning::Status::kNotFound};
+    std::vector<Eigen::VectorXf> path;      ///< Shortcut waypoints, start to goal; empty on failure.
+    std::vector<Eigen::VectorXf> raw_path;  ///< The path before shortcutting.
+    int iterations{};
+    int nodes{};
 };
 
 /// Inverse-kinematics result with a runtime-sized solution.
@@ -72,6 +82,14 @@ public:
     [[nodiscard]] virtual std::vector<collision::PosedCapsule> collision_capsules(const Eigen::VectorXf& joints) const = 0;
     /// The tightest self-collision pair at `joints` (infinite when none is checked).
     [[nodiscard]] virtual collision::Contact self_contact(const Eigen::VectorXf& joints) const = 0;
+    /// The tightest approach at `joints`, obstacles and self both.
+    [[nodiscard]] virtual collision::Contact nearest_contact(const Eigen::VectorXf& joints,
+                                                             const collision::CollisionWorld& world) const = 0;
+    /// Plans a collision-free joint path from `start` to `goal` with RRT-Connect.
+    [[nodiscard]] virtual DynamicPlanResult plan(const Eigen::VectorXf& start,
+                                                 const Eigen::VectorXf& goal,
+                                                 const collision::CollisionWorld& world,
+                                                 const planning::Options& options) const = 0;
 
 protected:
     Robot() = default;

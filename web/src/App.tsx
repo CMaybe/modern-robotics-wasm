@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import JointSliders from "./components/JointSliders";
 import PoseReadout from "./components/PoseReadout";
@@ -7,9 +7,27 @@ import RobotViewer, {
   type EllipsoidMode,
   type GizmoMode,
   type MeshStatus,
+  type ViewerObstacle,
 } from "./components/RobotViewer";
 import { useKinematics } from "./hooks/useKinematics";
-import type { IkMethod, IkOptions, IkResult, Robot } from "./kinematics/types";
+import type {
+  IkMethod,
+  IkOptions,
+  IkResult,
+  ObstacleWorld,
+  PlanResult,
+  Robot,
+} from "./kinematics/types";
+
+/** Joint-space replay speed for a planned path, radians per second. */
+const PLAYBACK_SPEED = 1.2;
+
+/** Where freshly added obstacles appear: in front of the arm, fanned out in y. */
+const OBSTACLE_SPAWNS: [number, number, number][] = [
+  [0.55, 0.0, 0.35],
+  [0.45, 0.3, 0.5],
+  [0.45, -0.3, 0.5],
+];
 
 const BASE_IK_OPTIONS: IkOptions = {
   maxIterations: 60,
@@ -35,6 +53,20 @@ export default function App() {
   const [ikMethod, setIkMethod] = useState<IkMethod>("qp");
   const ikOptions = useMemo<IkOptions>(() => ({ ...BASE_IK_OPTIONS, method: ikMethod }), [ikMethod]);
 
+  // Obstacles live in the world frame, so they survive a robot switch.
+  const [obstacles, setObstacles] = useState<ViewerObstacle[]>([]);
+  const [selectedObstacleId, setSelectedObstacleId] = useState<number | null>(null);
+  const nextObstacleIdRef = useRef(1);
+  const world = useMemo<ObstacleWorld>(
+    () => ({ spheres: obstacles.map(({ center, radius }) => ({ center, radius })) }),
+    [obstacles],
+  );
+
+  // Planner state is owned by the arm that produced it, like the joint angles.
+  const [planGoal, setPlanGoal] = useState<{ owner: Robot; angles: number[] } | null>(null);
+  const [plan, setPlan] = useState<{ owner: Robot; result: PlanResult } | null>(null);
+  const [playing, setPlaying] = useState(false);
+
   // Joint angles are owned by whichever arm produced them. Tagging them with that
   // arm means switching robots falls back to the new default instead of rendering
   // a configuration of the wrong length for a frame.
@@ -53,6 +85,87 @@ export default function App() {
 
   const handleIkResult = useCallback((result: IkResult | null) => setIkResult(result), []);
   const handleMeshStatus = useCallback((status: MeshStatus) => setMeshStatus(status), []);
+
+  const addObstacle = useCallback(() => {
+    const id = nextObstacleIdRef.current;
+    nextObstacleIdRef.current += 1;
+    const center = OBSTACLE_SPAWNS[(id - 1) % OBSTACLE_SPAWNS.length];
+    setObstacles((current) => [...current, { id, center, radius: 0.12 }]);
+    setSelectedObstacleId(id);
+  }, []);
+
+  const removeSelectedObstacle = useCallback(() => {
+    setObstacles((current) => {
+      const target = selectedObstacleId ?? current[current.length - 1]?.id;
+      return current.filter((obstacle) => obstacle.id !== target);
+    });
+    setSelectedObstacleId(null);
+  }, [selectedObstacleId]);
+
+  const handleObstacleMoved = useCallback((id: number, center: [number, number, number]) => {
+    setObstacles((current) =>
+      current.map((obstacle) => (obstacle.id === id ? { ...obstacle, center } : obstacle)),
+    );
+  }, []);
+
+  const setSelectedRadius = useCallback(
+    (radius: number) => {
+      setObstacles((current) =>
+        current.map((obstacle) =>
+          obstacle.id === selectedObstacleId ? { ...obstacle, radius } : obstacle,
+        ),
+      );
+    },
+    [selectedObstacleId],
+  );
+
+  // The plan runs synchronously in WASM; a few thousand extends take milliseconds.
+  const runPlan = useCallback(() => {
+    if (!arm || planGoal?.owner !== arm) {
+      return;
+    }
+    const result = arm.plan(jointAngles, planGoal.angles, world, {});
+    setPlan({ owner: arm, result });
+    setPlaying(result.status === "success");
+  }, [arm, planGoal, jointAngles, world]);
+
+  // Replays the planned path by interpolating the waypoints at constant
+  // joint-space speed; each frame flows through the normal FK pipeline.
+  useEffect(() => {
+    if (!playing || !arm || plan?.owner !== arm || plan.result.status !== "success") {
+      return undefined;
+    }
+    const path = plan.result.path;
+    const cumulative = [0];
+    for (let i = 1; i < path.length; i += 1) {
+      cumulative.push(
+        cumulative[i - 1] + Math.hypot(...path[i].map((value, j) => value - path[i - 1][j])),
+      );
+    }
+    const total = cumulative[cumulative.length - 1];
+
+    let handle = 0;
+    const startedAt = performance.now();
+    const tick = (now: number) => {
+      const travelled = ((now - startedAt) / 1000) * PLAYBACK_SPEED;
+      if (travelled >= total || total <= 0) {
+        setEdited({ owner: arm, angles: path[path.length - 1] });
+        setPlaying(false);
+        return;
+      }
+      let segment = 1;
+      while (cumulative[segment] < travelled) {
+        segment += 1;
+      }
+      const span = cumulative[segment] - cumulative[segment - 1];
+      const t = span > 0 ? (travelled - cumulative[segment - 1]) / span : 1;
+      const angles = path[segment - 1].map((value, j) => value + t * (path[segment][j] - value));
+      setEdited({ owner: arm, angles });
+      handle = requestAnimationFrame(tick);
+    };
+    handle = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(handle);
+  }, [playing, plan, arm]);
 
   // FK, manipulability and the ellipsoid are cheap enough to recompute per change.
   const pose = useMemo(
@@ -74,13 +187,47 @@ export default function App() {
   }, [arm, jointAngles, ellipsoidMode]);
 
   // Only queried while the overlay is on; the viewer polls the same call per frame.
-  const selfContact = useMemo(
+  const contact = useMemo(
     () =>
       arm && showCollision && jointAngles.length === arm.dof()
-        ? arm.collisionBody(jointAngles).selfContact
+        ? arm.nearestContact(jointAngles, world)
         : null,
-    [arm, jointAngles, showCollision],
+    [arm, jointAngles, showCollision, world],
   );
+
+  const selectedObstacle = obstacles.find((obstacle) => obstacle.id === selectedObstacleId) ?? null;
+
+  const plannedPaths = useMemo(
+    () =>
+      plan?.owner === arm && plan.result.status === "success"
+        ? { smoothed: plan.result.path, raw: plan.result.rawPath }
+        : null,
+    [arm, plan],
+  );
+
+  const planHint = useMemo(() => {
+    if (planGoal?.owner !== arm) {
+      return "Pose the arm at the desired goal and press Set goal; planning starts from wherever the arm is when you press Plan.";
+    }
+    if (plan?.owner !== arm) {
+      return "Goal stored. Plan path runs RRT-Connect from the current pose, avoiding the spheres.";
+    }
+    const result = plan.result;
+    switch (result.status) {
+      case "success":
+        return (
+          `Path found: ${result.path.length} waypoints, ${result.pathLength.toFixed(2)} rad after ` +
+          `shortcutting (raw ${result.rawPath.length} waypoints, ${result.rawLength.toFixed(2)} rad); ` +
+          `${result.nodes} tree nodes in ${result.iterations} iterations.`
+        );
+      case "start_invalid":
+        return "The current pose is in collision or out of limits — move the arm clear and plan again.";
+      case "goal_invalid":
+        return "The stored goal collides with the obstacles — pose the arm clear and set a new goal.";
+      default:
+        return `No path found within ${result.iterations} iterations — move or shrink the obstacles.`;
+    }
+  }, [arm, planGoal, plan]);
 
   const meshStatusHint = useMemo(() => {
     switch (meshStatus.state) {
@@ -134,6 +281,10 @@ export default function App() {
           gizmoMode={gizmoMode}
           showJointAxes={showJointAxes}
           showCollision={showCollision}
+          obstacles={obstacles}
+          selectedObstacleId={selectedObstacleId}
+          onObstacleMoved={handleObstacleMoved}
+          plannedPaths={plannedPaths}
           ellipsoidMode={ellipsoidMode}
           displayMode={displayMode}
           onMeshStatus={handleMeshStatus}
@@ -184,13 +335,13 @@ export default function App() {
               />
               Collision capsules
             </label>
-            {selfContact && (
-              <p className="hint" data-testid="self-clearance">
-                {!Number.isFinite(selfContact.distance)
-                  ? "No self-collision pairs to check."
-                  : selfContact.distance <= 0
-                    ? `Self-collision: ${(-selfContact.distance * 1000).toFixed(1)} mm penetration.`
-                    : `Tightest self-clearance: ${(selfContact.distance * 1000).toFixed(1)} mm.`}
+            {contact && (
+              <p className="hint" data-testid="clearance">
+                {!Number.isFinite(contact.distance)
+                  ? "No contacts to check."
+                  : contact.distance <= 0
+                    ? `Collision: ${(-contact.distance * 1000).toFixed(1)} mm penetration.`
+                    : `Tightest clearance: ${(contact.distance * 1000).toFixed(1)} mm.`}
               </p>
             )}
           </section>
@@ -277,6 +428,66 @@ export default function App() {
               The image of the unit ball of joint velocities, drawn at the end-effector. A long
               axis is a direction the tool moves easily; a flat one is a direction it barely moves
               at all.
+            </p>
+          </section>
+
+          <section className="panel__section">
+            <h2>Motion planning</h2>
+            <div className="buttons">
+              <button type="button" onClick={addObstacle}>
+                Add obstacle
+              </button>
+              <button type="button" onClick={removeSelectedObstacle} disabled={obstacles.length === 0}>
+                Remove
+              </button>
+            </div>
+            {obstacles.length > 0 && (
+              <div className="buttons">
+                {obstacles.map((obstacle, index) => (
+                  <button
+                    key={obstacle.id}
+                    type="button"
+                    className={obstacle.id === selectedObstacleId ? "is-active" : ""}
+                    onClick={() =>
+                      setSelectedObstacleId(obstacle.id === selectedObstacleId ? null : obstacle.id)
+                    }
+                  >
+                    #{index + 1} · r {(obstacle.radius * 100).toFixed(0)} cm
+                  </button>
+                ))}
+              </div>
+            )}
+            {selectedObstacle && (
+              <label className="slider">
+                <span className="slider__label">
+                  <span className="slider__name">obstacle radius</span>
+                  <span className="slider__value">{(selectedObstacle.radius * 100).toFixed(0)} cm</span>
+                </span>
+                <input
+                  type="range"
+                  min={0.05}
+                  max={0.3}
+                  step={0.01}
+                  value={selectedObstacle.radius}
+                  onChange={(event) => setSelectedRadius(Number(event.target.value))}
+                />
+              </label>
+            )}
+            <div className="buttons">
+              <button type="button" onClick={() => setPlanGoal({ owner: arm, angles: jointAngles })}>
+                Set goal = current
+              </button>
+              <button type="button" onClick={runPlan} disabled={planGoal?.owner !== arm}>
+                Plan path
+              </button>
+              {plan?.owner === arm && plan.result.status === "success" && (
+                <button type="button" onClick={() => setPlaying((value) => !value)}>
+                  {playing ? "Stop" : "Replay"}
+                </button>
+              )}
+            </div>
+            <p className="hint" data-testid="plan-status">
+              {planHint}
             </p>
           </section>
 

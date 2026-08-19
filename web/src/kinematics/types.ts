@@ -80,6 +80,49 @@ export interface CollisionBody {
   selfContact: CollisionContact;
 }
 
+/** A spherical obstacle in the space frame. */
+export interface SphereObstacle {
+  /** `[x, y, z]` in metres. */
+  center: [number, number, number];
+  /** Metres. */
+  radius: number;
+}
+
+/** The obstacle world passed to collision queries and the planner. */
+export interface ObstacleWorld {
+  spheres: SphereObstacle[];
+}
+
+/** How a motion plan ended. */
+export type PlanStatus = "success" | "start_invalid" | "goal_invalid" | "not_found";
+
+export interface PlanOptions {
+  maxIterations?: number;
+  /** Joint-space extension step, radians. */
+  step?: number;
+  /** Collision-check spacing along an edge, radians. */
+  resolution?: number;
+  /** Clearance every configuration must keep, metres. */
+  margin?: number;
+  shortcutRounds?: number;
+  /** RNG seed; the same seed reproduces the same path. */
+  seed?: number;
+}
+
+export interface PlanResult {
+  status: PlanStatus;
+  /** Shortcut waypoints, start to goal; empty on failure. */
+  path: number[][];
+  /** The path as the trees found it, before shortcutting. */
+  rawPath: number[][];
+  iterations: number;
+  nodes: number;
+  /** Joint-space length of `path`, radians. */
+  pathLength: number;
+  /** Joint-space length of `rawPath`, radians. */
+  rawLength: number;
+}
+
 /**
  * How each IK iteration turns the task error into a joint-space step.
  *
@@ -141,6 +184,10 @@ export interface Robot {
   manipulabilityEllipsoids(angles: number[]): ManipulabilityEllipsoids;
   /** The collision capsules posed at `angles`, plus the tightest self-collision pair. */
   collisionBody(angles: number[]): CollisionBody;
+  /** The tightest approach at `angles` — obstacles and self both. */
+  nearestContact(angles: number[], world: ObstacleWorld): CollisionContact;
+  /** Plans a collision-free joint path from `start` to `goal` with RRT-Connect. */
+  plan(start: number[], goal: number[], world: ObstacleWorld, options: PlanOptions): PlanResult;
   inverse(
     initialGuess: number[],
     position: number[],

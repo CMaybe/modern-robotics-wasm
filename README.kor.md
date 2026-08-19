@@ -16,6 +16,14 @@ C++로 작성한 **Product of Exponentials(PoE)** 기반 정/역기구학을 **W
 
 ---
 
+## 데모
+
+[![FK/IK 데모 — 이미지를 클릭하면 영상이 재생됩니다](docs/demo-preview.jpg)](docs/demo.mp4)
+
+**이미지를 클릭하면 영상을 볼 수 있습니다** ([docs/demo.mp4](docs/demo.mp4)).
+
+---
+
 ## 빠른 시작
 
 ```sh
@@ -101,19 +109,6 @@ C++20 기준이며, `.clang-format` 과 `.clang-tidy` 가 기계적으로 강제
 | 상수 · constexpr | `kCamelCase` | `kPi`, `kFr3DhTable` |
 | 네임스페이스 | `snake_case` | `robotics::models`, `robotics::ik` |
 | 파일 | `snake_case.hpp` | `serial_chain.hpp` |
-
-그 외 지켜지는 것들:
-
-- **헤더 가드는 `#pragma once`.**
-- **출력 파라미터를 쓰지 않습니다.** 값을 반환하고 `[[nodiscard]]` 를 붙입니다.
-- **알고리즘은 자유 함수.** `SerialChain` 은 순수 기구학 모델이고, IK와 조작성은
-  그 위에 얹힌 자유 함수라 서로 독립적으로 바뀔 수 있습니다.
-- **불변식은 타입으로.** 관절은 생성자에서 통째로 받으므로 "일부만 정의된 체인"이
-  표현 불가능합니다. `Pose = Sophus::SE3f` 라 회전 행렬이 직교성을 잃지 않습니다.
-- `M_PI` 대신 `std::numbers::pi_v<Scalar>`, C 배열 대신 `std::array`,
-  옵션 구조체는 지정 초기화(designated initializer)로 넘깁니다.
-- embind 파사드만 예외적으로 camelCase 메서드를 씁니다 (JS 관례). 해당 디렉터리에
-  별도 `.clang-tidy` 로 명시해 두었습니다.
 
 ---
 

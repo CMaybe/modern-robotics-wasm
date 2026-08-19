@@ -17,6 +17,14 @@ joint-limit-respecting IK. The frontend is React + webpack + three-stdlib.
 
 ---
 
+## Demo
+
+[![FK/IK demo — click to watch the video](docs/demo-preview.jpg)](docs/demo.mp4)
+
+**click the image to watch the video** ([docs/demo.mp4](docs/demo.mp4)).
+
+---
+
 ## Quick start
 
 ```sh
@@ -103,20 +111,6 @@ The codebase targets C++20; `.clang-format` and `.clang-tidy` enforce the rules 
 | Constants · constexpr | `kCamelCase` | `kPi`, `kFr3DhTable` |
 | Namespaces | `snake_case` | `robotics::models`, `robotics::ik` |
 | Files | `snake_case.hpp` | `serial_chain.hpp` |
-
-Other rules the code follows:
-
-- **Header guards are `#pragma once`.**
-- **No output parameters.** Return values instead, marked `[[nodiscard]]`.
-- **Algorithms are free functions.** `SerialChain` is a pure kinematic model; IK and
-  manipulability are free functions layered on top, so each can change independently.
-- **Invariants live in types.** Joints are taken all at once in the constructor, so a
-  "partially defined chain" is unrepresentable. `Pose = Sophus::SE3f`, so rotation matrices
-  never lose orthogonality.
-- `std::numbers::pi_v<Scalar>` instead of `M_PI`, `std::array` instead of C arrays,
-  and option structs are passed with designated initializers.
-- The embind facade is the one exception that uses camelCase methods (JS convention).
-  A dedicated `.clang-tidy` in that directory makes this explicit.
 
 ---
 

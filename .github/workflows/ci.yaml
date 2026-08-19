@@ -22,6 +22,12 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      - name: Read the runner UID/GID
+        id: runner-user
+        run: |
+          echo "uid=$(id -u)" >> "$GITHUB_OUTPUT"
+          echo "gid=$(id -g)" >> "$GITHUB_OUTPUT"
+
       - name: Build the dev image
         uses: docker/build-push-action@v6
         with:
@@ -29,6 +35,9 @@ jobs:
           file: docker/Dockerfile
           tags: modern-robotics-wasm:dev
           load: true
+          build-args: |
+            USER_UID=${{ steps.runner-user.outputs.uid }}
+            USER_GID=${{ steps.runner-user.outputs.gid }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -44,6 +53,7 @@ jobs:
       # frontend type check and production build.
       - name: Run the check suite
         run: |
+          mkdir -p "${HOME}/.npm"
           docker run --rm \
             -v "${PWD}:/home/robotics/modern-robotics-wasm" \
             -v "${HOME}/.npm:/home/robotics/.npm" \
@@ -63,6 +73,12 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      - name: Read the runner UID/GID
+        id: runner-user
+        run: |
+          echo "uid=$(id -u)" >> "$GITHUB_OUTPUT"
+          echo "gid=$(id -g)" >> "$GITHUB_OUTPUT"
+
       - name: Build the dev image
         uses: docker/build-push-action@v6
         with:
@@ -70,6 +86,9 @@ jobs:
           file: docker/Dockerfile
           tags: modern-robotics-wasm:dev
           load: true
+          build-args: |
+            USER_UID=${{ steps.runner-user.outputs.uid }}
+            USER_GID=${{ steps.runner-user.outputs.gid }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

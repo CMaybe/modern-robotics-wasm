@@ -1,5 +1,6 @@
 #pragma once
 
+#include "robotics/collision/robot_geometry.hpp"
 #include "robotics/core/dh.hpp"
 #include "robotics/kinematics/serial_chain.hpp"
 
@@ -69,6 +70,27 @@ inline constexpr std::array<JointLimit, kFr3Dof> kFr3JointLimits{{
     }
 
     return Fr3Chain{specs, frame * modified_dh_transform(kFr3FlangeRow, Scalar{0})};
+}
+
+/**
+ * @brief FR3 collision body: capsules spanning the joint-frame origins.
+ *
+ * The radii are padded to enclose the vendor meshes, so the model errs
+ * conservative: it may flag a near miss, but a configuration it accepts is
+ * clear on the real geometry too.
+ */
+[[nodiscard]] inline collision::RobotGeometry fr3_collision(const Fr3Chain& chain = fr3()) {
+    // One radius per span: base column, j1->j2 (zero length), upper arm, elbow
+    // offset, forearm, j5->j6 (zero length), wrist offset, flange drop.
+    constexpr std::array<Scalar, kFr3Dof + 1> kRadii{
+        Scalar{0.08}, Scalar{0.07}, Scalar{0.07}, Scalar{0.065}, Scalar{0.06}, Scalar{0.055}, Scalar{0.055}, Scalar{0.05}};
+    auto geometry = collision::geometry_from_link_frames(chain, kRadii);
+    // The elbow (0.0825 m) and wrist (0.088 m) offsets are shorter than the
+    // paired radii, so these pairs overlap permanently near the corner they
+    // share — the capsule-skeleton equivalent of links that touch by
+    // construction, disabled the way an SRDF disables such pairs.
+    geometry.disabled_self_pairs = {{1, 3}, {3, 5}};
+    return geometry;
 }
 
 }  // namespace robotics::models

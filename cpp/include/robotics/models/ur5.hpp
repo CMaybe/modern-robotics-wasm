@@ -1,5 +1,6 @@
 #pragma once
 
+#include "robotics/collision/robot_geometry.hpp"
 #include "robotics/kinematics/serial_chain.hpp"
 
 namespace robotics::models {
@@ -78,6 +79,28 @@ struct Ur5Dimensions {
     const Pose flange{Sophus::SO3<Scalar>::fitToSO3(flange_rotation), Vector3{l1 + l2, w1 + w2, h1 - h2}};
 
     return Ur5Chain{specs, flange};
+}
+
+/**
+ * @brief UR5 collision body: capsules spanning the joint-frame origins.
+ *
+ * The radii are padded to enclose the vendor meshes (base column ~75 mm, arm
+ * tubes 45-60 mm), so the model errs conservative: it may flag a near miss, but
+ * a configuration it accepts is clear on the real geometry too.
+ */
+[[nodiscard]] inline collision::RobotGeometry ur5_collision(const Ur5Chain& chain = ur5()) {
+    // One radius per span: base->j0 (zero length), base column, upper arm,
+    // forearm, wrist 1, wrist 2, wrist 3 + flange.
+    constexpr std::array<Scalar, kUr5Dof + 1> kRadii{
+        Scalar{0.075}, Scalar{0.075}, Scalar{0.06}, Scalar{0.05}, Scalar{0.045}, Scalar{0.045}, Scalar{0.045}};
+    auto geometry = collision::geometry_from_link_frames(chain, kRadii);
+    // Pairs whose gap no joint can close: the shoulder offset holds the forearm
+    // and the wrist-2 drop exactly 0.109 m apart, and the wrist drop holds
+    // wrist 1 and the flange 0.095 m apart, at every configuration. Their
+    // capsule distance is a constant near-touch, so checking them could only
+    // ever produce false positives.
+    geometry.disabled_self_pairs = {{2, 4}, {3, 5}};
+    return geometry;
 }
 
 }  // namespace robotics::models

@@ -167,6 +167,36 @@ export interface IkResult {
   orientationError: number;
 }
 
+/** How the simulated arm is actuated each substep. */
+export type SimController = "passive" | "gravity" | "pd" | "track";
+
+export interface SimulateOptions {
+  controller?: SimController;
+  /** Seconds to advance; 1 ms substeps run internally. */
+  duration?: number;
+  /** Reference position for "pd"/"track"; defaults to the current position. */
+  qRef?: number[];
+  /** Reference velocity for "track". */
+  qdRef?: number[];
+  /** Reference acceleration for "track". */
+  qddRef?: number[];
+  /** Proportional gain of the mass-shaped error dynamics, 1/s^2. */
+  kp?: number;
+  /** Derivative gain, 1/s. */
+  kd?: number;
+  /** Viscous joint friction, N m s/rad. */
+  damping?: number;
+  /** Per-joint actuation limit, N m. */
+  maxTorque?: number;
+}
+
+export interface SimulateResult {
+  position: number[];
+  velocity: number[];
+  /** Torque commanded on the last substep, N m. */
+  torque: number[];
+}
+
 /** A named configuration, guaranteed by C++ to sit inside the joint limits. */
 export interface RobotPreset {
   label: string;
@@ -202,6 +232,8 @@ export interface Robot {
   nearestContact(angles: number[], world: ObstacleWorld): CollisionContact;
   /** Plans a collision-free joint path from `start` to `goal` with RRT-Connect. */
   plan(start: number[], goal: number[], world: ObstacleWorld, options: PlanOptions): PlanResult;
+  /** Advances the rigid-body simulation under the selected controller. */
+  simulate(position: number[], velocity: number[], options: SimulateOptions): SimulateResult;
   inverse(
     initialGuess: number[],
     position: number[],

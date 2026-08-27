@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "robotics/collision/world.hpp"
+#include "robotics/dynamics/simulation.hpp"
 #include "robotics/kinematics/manipulability.hpp"
 #include "robotics/kinematics/serial_chain.hpp"
 #include "robotics/planning/rrt_connect.hpp"
@@ -32,6 +33,20 @@ struct DynamicPlanResult {
     bool optimized_feasible{false};  ///< Whether the optimiser's own output validated.
     int iterations{};
     int nodes{};
+};
+
+/// One simulation advance with runtime-sized state.
+struct DynamicSimResult {
+    Eigen::VectorXf position;
+    Eigen::VectorXf velocity;
+    Eigen::VectorXf torque;  ///< The torque commanded on the last substep.
+};
+
+/// The reference a simulated controller regulates to, runtime-sized.
+struct DynamicReference {
+    Eigen::VectorXf position;
+    Eigen::VectorXf velocity;
+    Eigen::VectorXf acceleration;
 };
 
 /// Inverse-kinematics result with a runtime-sized solution.
@@ -90,6 +105,14 @@ public:
     /// The tightest approach at `joints`, obstacles and self both.
     [[nodiscard]] virtual collision::Contact nearest_contact(const Eigen::VectorXf& joints,
                                                              const collision::CollisionWorld& world) const = 0;
+    /// Advances the rigid-body simulation by `duration` under the given controller.
+    [[nodiscard]] virtual DynamicSimResult simulate(const Eigen::VectorXf& position,
+                                                    const Eigen::VectorXf& velocity,
+                                                    dynamics::Controller controller,
+                                                    const DynamicReference& reference,
+                                                    Scalar duration,
+                                                    const dynamics::SimulationOptions& options) const = 0;
+
     /// Plans a collision-free joint path from `start` to `goal` with RRT-Connect,
     /// then smooths the shortcut result with the trajectory optimiser.
     [[nodiscard]] virtual DynamicPlanResult plan(const Eigen::VectorXf& start,

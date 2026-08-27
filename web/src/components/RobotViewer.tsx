@@ -60,6 +60,12 @@ export interface RobotViewerProps {
   onObstacleMoved: (id: number, center: [number, number, number]) => void;
   /** End-effector traces of the last plan, or null to hide them. */
   plannedPaths: PlannedPathTraces | null;
+  /**
+   * True while the dynamics simulation owns the arm. Gizmo IK results are then
+   * only reported (they become the controller's reference); drawing them here
+   * would fight the simulation frames and make the arm stutter mid-drag.
+   */
+  simulationActive: boolean;
   /** Which manipulability ellipsoid to overlay on the end-effector. */
   ellipsoidMode: EllipsoidMode;
   /** Whether to draw the vendor meshes or the schematic skeleton. */
@@ -136,6 +142,7 @@ export default function RobotViewer({
   selectedObstacleId,
   onObstacleMoved,
   plannedPaths,
+  simulationActive,
   ellipsoidMode,
   displayMode,
   onMeshStatus,
@@ -172,6 +179,8 @@ export default function RobotViewer({
   const syncObstaclesRef = useRef<((list: ViewerObstacle[], selectedId: number | null) => void) | null>(null);
   const syncPlannedPathsRef = useRef<((paths: PlannedPathTraces | null) => void) | null>(null);
   const obstacleDraggingRef = useRef(false);
+  const simulationActiveRef = useRef(simulationActive);
+  simulationActiveRef.current = simulationActive;
   const onMeshStatusRef = useRef(onMeshStatus);
   onMeshStatusRef.current = onMeshStatus;
   const displayModeRef = useRef(displayMode);
@@ -736,9 +745,13 @@ export default function RobotViewer({
         ikOptionsRef.current,
       );
 
-      // Draw immediately so the arm tracks the pointer without waiting for React.
-      jointAnglesRef.current = result.angles;
-      applyAngles(result.angles);
+      // Draw immediately so the arm tracks the pointer without waiting for
+      // React — unless the simulation owns the arm, in which case the IK
+      // solution is only the reference and the sim frames do the drawing.
+      if (!simulationActiveRef.current) {
+        jointAnglesRef.current = result.angles;
+        applyAngles(result.angles);
+      }
 
       onJointAnglesChangeRef.current(result.angles);
       onIkResultRef.current(result);

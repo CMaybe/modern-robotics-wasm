@@ -317,6 +317,57 @@ public:
     }
 
     /**
+     * @brief Advances the rigid-body simulation by `duration` seconds.
+     *
+     * @param position Joint angles [rad].
+     * @param velocity Joint rates [rad/s].
+     * @param options Optional `{ controller, duration, qRef, qdRef, qddRef, kp, kd,
+     *        damping, maxTorque }`. `controller` is one of "passive", "gravity",
+     *        "pd", "track" (computed torque). `qRef` defaults to the current
+     *        position, so "pd" with no reference holds the pose it was given.
+     * @return `{ position, velocity, torque }` after the substeps.
+     */
+    [[nodiscard]] val simulate(const val& position, const val& velocity, const val& options) const {
+        const std::string mode = read_string(options, "controller", "passive");
+        robotics::dynamics::Controller controller = robotics::dynamics::Controller::kPassive;
+        if (mode == "gravity") {
+            controller = robotics::dynamics::Controller::kGravity;
+        } else if (mode == "pd") {
+            controller = robotics::dynamics::Controller::kPd;
+        } else if (mode == "track") {
+            controller = robotics::dynamics::Controller::kComputedTorque;
+        }
+
+        const auto read_joints = [&](const char* key, const Eigen::VectorXf& fallback) {
+            if (options.isUndefined() || options.isNull()) {
+                return fallback;
+            }
+            const val value = options[key];
+            return (value.isUndefined() || value.isNull()) ? fallback : to_joints(value, model_->dof());
+        };
+        const Eigen::VectorXf zero = Eigen::VectorXf::Zero(model_->dof());
+        const robotics::DynamicReference reference{.position = read_joints("qRef", joints(position)),
+                                                   .velocity = read_joints("qdRef", zero),
+                                                   .acceleration = read_joints("qddRef", zero)};
+
+        robotics::dynamics::SimulationOptions settings;
+        settings.kp = read_number(options, "kp", settings.kp);
+        settings.kd = read_number(options, "kd", settings.kd);
+        settings.damping = read_number(options, "damping", settings.damping);
+        settings.max_torque = read_number(options, "maxTorque", settings.max_torque);
+        const Scalar duration = read_number(options, "duration", Scalar{1} / Scalar{60});
+
+        const robotics::DynamicSimResult result =
+            model_->simulate(joints(position), joints(velocity), controller, reference, duration, settings);
+
+        val object = val::object();
+        object.set("position", from_vector(result.position));
+        object.set("velocity", from_vector(result.velocity));
+        object.set("torque", from_vector(result.torque));
+        return object;
+    }
+
+    /**
      * @brief The tightest approach at `angles` — obstacles and self both.
      * @param world Optional `{ spheres: [{ center, radius }] }` in the space frame.
      */
@@ -486,6 +537,7 @@ EMSCRIPTEN_BINDINGS(kinematics_module) {
         .function("manipulabilityEllipsoids", &RobotHandle::manipulabilityEllipsoids)
         .function("collisionBody", &RobotHandle::collisionBody)
         .function("nearestContact", &RobotHandle::nearestContact)
+        .function("simulate", &RobotHandle::simulate)
         .function("plan", &RobotHandle::plan)
         .function("inverse", &RobotHandle::inverse);
 

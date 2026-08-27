@@ -202,6 +202,26 @@ async function main() {
   check("an unreachable goal reports goal_invalid",
     ur5.plan(planStart, [0, 0, Math.PI, 0, 0, 0], {}, {}).status === "goal_invalid");
 
+  console.log("\nDynamics:");
+  const restPose = [0.4, -1.1, 1.3, -0.2, 1.0, 0.3];
+  const zeros = restPose.map(() => 0);
+
+  const held = ur5.simulate(restPose, zeros, { controller: "gravity", duration: 0.2 });
+  check("gravity compensation holds the arm still",
+    held.position.every((v, i) => Math.abs(v - restPose[i]) < 1e-2) && held.velocity.every((v) => Math.abs(v) < 0.05),
+    JSON.stringify(held.position));
+
+  const fallen = ur5.simulate(restPose, zeros, { controller: "passive", duration: 0.3 });
+  check("the passive arm falls under gravity",
+    Math.hypot(...fallen.position.map((v, i) => v - restPose[i])) > 0.05 && fallen.position.every(Number.isFinite));
+
+  const pdTarget = [0.0, -0.9, 1.0, 0.1, 0.8, 0.0];
+  const settled = ur5.simulate(restPose, zeros, { controller: "pd", qRef: pdTarget, duration: 4.0 });
+  check("PD with gravity compensation reaches the target",
+    Math.hypot(...settled.position.map((v, i) => v - pdTarget[i])) < 0.05,
+    JSON.stringify(settled.position));
+  check("simulate reports the commanded torque", settled.torque.length === 6 && settled.torque.every(Number.isFinite));
+
   ur5.delete();
   fr3.delete();
 

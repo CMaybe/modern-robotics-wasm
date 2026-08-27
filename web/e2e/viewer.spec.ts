@@ -150,6 +150,35 @@ test.describe("viewer", () => {
     await expect(readoutRows(page).first()).toContainText("0.9887");
   });
 
+  test("the dynamics simulation drops the arm and PD holds it", async ({ page }) => {
+    await waitForViewer(page);
+    const before = await readoutRows(page).first().textContent();
+
+    // The ellipsoid section also has an "Off" button, so scope to Dynamics.
+    const dynamics = page
+      .locator(".panel__section")
+      .filter({ has: page.getByRole("heading", { name: "Dynamics" }) });
+
+    // Passive: gravity must visibly move the end-effector within a second.
+    await dynamics.getByRole("button", { name: "Passive", exact: true }).click();
+    await expect(page.getByTestId("sim-status")).toContainText("No actuation");
+    await expect(readoutRows(page).first()).not.toHaveText(before ?? "", { timeout: 10_000 });
+
+    // Gravity comp: a preset carries the body itself, and it floats there —
+    // the readout must settle on the Modern Robotics pose and hold it.
+    await dynamics.getByRole("button", { name: "Gravity comp", exact: true }).click();
+    await page.getByRole("button", { name: "MR Example 4.5", exact: true }).click();
+    await expect(readoutRows(page).first()).toContainText("0.0947", { timeout: 5_000 });
+    await expect(readoutRows(page).first()).toContainText("0.9887");
+
+    // PD hold: the arm chases the preset reference instead of teleporting.
+    await dynamics.getByRole("button", { name: "PD hold", exact: true }).click();
+    await page.getByRole("button", { name: "Ready", exact: true }).click();
+    await expect(page.getByTestId("sim-status")).toContainText("reference");
+
+    await dynamics.getByRole("button", { name: "Off", exact: true }).click();
+  });
+
   test("both IK step rules are selectable", async ({ page }) => {
     await waitForViewer(page);
 

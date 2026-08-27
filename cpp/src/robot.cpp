@@ -30,12 +30,14 @@ public:
                std::string_view label,
                SerialChain<Dof> chain,
                collision::RobotGeometry geometry,
+               dynamics::DynamicsModel<Dof> dynamics_model,
                const JointVector<Dof>& default_joints,
                std::vector<RobotPreset> presets)
         : id_{id}
         , label_{label}
         , chain_{std::move(chain)}
         , geometry_{std::move(geometry)}
+        , dynamics_{std::move(dynamics_model)}
         , presets_{std::move(presets)}
         , lower_{chain_.lower_limits()}
         , upper_{chain_.upper_limits()}
@@ -96,6 +98,20 @@ public:
         return collision::self_contact(geometry_, collision_capsules(joints));
     }
 
+    [[nodiscard]] DynamicSimResult simulate(const Eigen::VectorXf& position,
+                                            const Eigen::VectorXf& velocity,
+                                            dynamics::Controller controller,
+                                            const DynamicReference& reference,
+                                            Scalar duration,
+                                            const dynamics::SimulationOptions& options) const override {
+        dynamics::SimState<Dof> state{to_fixed(position), to_fixed(velocity)};
+        const dynamics::Reference<Dof> fixed_reference{
+            to_fixed(reference.position), to_fixed(reference.velocity), to_fixed(reference.acceleration)};
+
+        const JointVector<Dof> torque = dynamics::simulate(dynamics_, state, fixed_reference, controller, duration, options);
+        return DynamicSimResult{.position = state.position, .velocity = state.velocity, .torque = torque};
+    }
+
     [[nodiscard]] collision::Contact nearest_contact(const Eigen::VectorXf& joints,
                                                      const collision::CollisionWorld& world) const override {
         return collision::nearest_contact(chain_, geometry_, to_fixed(joints), world);
@@ -138,6 +154,7 @@ private:
     std::string label_;
     SerialChain<Dof> chain_;
     collision::RobotGeometry geometry_;
+    dynamics::DynamicsModel<Dof> dynamics_;
     std::vector<RobotPreset> presets_;
     std::vector<std::string> names_;
     Eigen::VectorXf lower_;
@@ -158,8 +175,14 @@ private:
 
     auto chain = models::ur5();
     auto geometry = models::ur5_collision(chain);
-    return std::make_unique<ChainRobot<models::kUr5Dof>>(
-        "ur5", "Universal Robots UR5", std::move(chain), std::move(geometry), ready, std::move(presets));
+    auto dynamics_model = models::ur5_dynamics(chain);
+    return std::make_unique<ChainRobot<models::kUr5Dof>>("ur5",
+                                                         "Universal Robots UR5",
+                                                         std::move(chain),
+                                                         std::move(geometry),
+                                                         std::move(dynamics_model),
+                                                         ready,
+                                                         std::move(presets));
 }
 
 [[nodiscard]] std::unique_ptr<Robot> make_fr3_robot() {
@@ -174,8 +197,14 @@ private:
 
     auto chain = models::fr3();
     auto geometry = models::fr3_collision(chain);
-    return std::make_unique<ChainRobot<models::kFr3Dof>>(
-        "fr3", "Franka Research 3", std::move(chain), std::move(geometry), models::fr3_ready(), std::move(presets));
+    auto dynamics_model = models::fr3_dynamics(chain);
+    return std::make_unique<ChainRobot<models::kFr3Dof>>("fr3",
+                                                         "Franka Research 3",
+                                                         std::move(chain),
+                                                         std::move(geometry),
+                                                         std::move(dynamics_model),
+                                                         models::fr3_ready(),
+                                                         std::move(presets));
 }
 
 }  // namespace

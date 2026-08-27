@@ -1,6 +1,7 @@
 #pragma once
 
 #include "robotics/collision/robot_geometry.hpp"
+#include "robotics/dynamics/newton_euler.hpp"
 #include "robotics/kinematics/serial_chain.hpp"
 
 namespace robotics::models {
@@ -81,19 +82,21 @@ struct Ur5Dimensions {
     return Ur5Chain{specs, flange};
 }
 
+/// One radius per skeleton span: base->j0 (zero length), base column, upper
+/// arm, forearm, wrist 1, wrist 2, wrist 3 + flange. Shared by the collision
+/// capsules and the dynamics inertias, so both describe the same body.
+inline constexpr std::array<Scalar, kUr5Dof + 1> kUr5CapsuleRadii{
+    Scalar{0.075}, Scalar{0.075}, Scalar{0.06}, Scalar{0.05}, Scalar{0.045}, Scalar{0.045}, Scalar{0.045}};
+
 /**
  * @brief UR5 collision body: capsules spanning the joint-frame origins.
  *
- * The radii are padded to enclose the vendor meshes (base column ~75 mm, arm
- * tubes 45-60 mm), so the model errs conservative: it may flag a near miss, but
- * a configuration it accepts is clear on the real geometry too.
+ * The radii are padded to enclose the vendor meshes, so the model errs
+ * conservative: it may flag a near miss, but a configuration it accepts is
+ * clear on the real geometry too.
  */
 [[nodiscard]] inline collision::RobotGeometry ur5_collision(const Ur5Chain& chain = ur5()) {
-    // One radius per span: base->j0 (zero length), base column, upper arm,
-    // forearm, wrist 1, wrist 2, wrist 3 + flange.
-    constexpr std::array<Scalar, kUr5Dof + 1> kRadii{
-        Scalar{0.075}, Scalar{0.075}, Scalar{0.06}, Scalar{0.05}, Scalar{0.045}, Scalar{0.045}, Scalar{0.045}};
-    auto geometry = collision::geometry_from_link_frames(chain, kRadii);
+    auto geometry = collision::geometry_from_link_frames(chain, kUr5CapsuleRadii);
     // Pairs whose gap no joint can close: the shoulder offset holds the forearm
     // and the wrist-2 drop exactly 0.109 m apart, and the wrist drop holds
     // wrist 1 and the flange 0.095 m apart, at every configuration. Their
@@ -101,6 +104,19 @@ struct Ur5Dimensions {
     // ever produce false positives.
     geometry.disabled_self_pairs = {{2, 4}, {3, 5}};
     return geometry;
+}
+
+/**
+ * @brief UR5 link inertias: manufacturer masses on the capsule skeleton.
+ *
+ * The masses are the `ur_description` values (shoulder to wrist 3); each is
+ * spread uniformly over the link's capsule, so the tensors are approximate but
+ * consistent with the geometry everything else uses.
+ */
+[[nodiscard]] inline dynamics::DynamicsModel<kUr5Dof> ur5_dynamics(const Ur5Chain& chain = ur5()) {
+    constexpr std::array<Scalar, kUr5Dof> kMasses{
+        Scalar{3.7}, Scalar{8.393}, Scalar{2.275}, Scalar{1.219}, Scalar{1.219}, Scalar{0.1879}};
+    return dynamics::DynamicsModel<kUr5Dof>{chain, dynamics::inertias_from_link_frames(chain, kUr5CapsuleRadii, kMasses)};
 }
 
 }  // namespace robotics::models

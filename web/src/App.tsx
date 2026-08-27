@@ -17,7 +17,12 @@ import type {
   ObstacleWorld,
   PlanResult,
   Robot,
+  SimController,
+  SimulateOptions,
 } from "./kinematics/types";
+
+/** The dynamics panel's mode: off, or one of the C++ controllers. */
+type SimMode = "off" | SimController;
 
 /** Joint-space replay speed for a planned path, radians per second. */
 const PLAYBACK_SPEED = 1.2;
@@ -74,9 +79,39 @@ export default function App() {
   const defaults = useMemo(() => (arm ? arm.defaultConfiguration() : []), [arm]);
   const jointAngles = edited && edited.owner === arm ? edited.angles : defaults;
 
+  // Dynamics simulation. While it runs, the displayed configuration is the sim
+  // state and every pose input (sliders, presets, the IK gizmo) becomes the
+  // reference the controller chases instead of teleporting the arm.
+  const [simMode, setSimMode] = useState<SimMode>("off");
+  const [simTarget, setSimTarget] = useState<{ owner: Robot; angles: number[] } | null>(null);
+  const simStateRef = useRef<{ owner: Robot; q: number[]; qd: number[] } | null>(null);
+  const simModeRef = useRef(simMode);
+  simModeRef.current = simMode;
+  const simTargetRef = useRef(simTarget);
+  simTargetRef.current = simTarget;
+  const trackProgressRef = useRef(0);
+
   const setJointAngles = useCallback(
     (angles: number[]) => {
-      if (arm) {
+      if (!arm) {
+        return;
+      }
+      const mode = simModeRef.current;
+      if (mode === "off") {
+        setEdited({ owner: arm, angles });
+      } else if (mode === "pd") {
+        // PD chases the reference — that is the whole demonstration. Write the
+        // ref directly too, so a fast drag reaches the very next sim frame
+        // instead of waiting one React render.
+        const target = { owner: arm, angles };
+        simTargetRef.current = target;
+        setSimTarget(target);
+      } else {
+        // Passive, gravity comp, track: pose inputs carry the simulated body
+        // itself, the way you would hand-guide a gravity-compensated arm.
+        // Velocity clears so it stays (or falls, or gets pulled back) from there.
+        simStateRef.current = { owner: arm, q: [...angles], qd: angles.map(() => 0) };
+        setSimTarget({ owner: arm, angles });
         setEdited({ owner: arm, angles });
       }
     },
@@ -126,8 +161,18 @@ export default function App() {
     }
     const result = arm.plan(jointAngles, planGoal.angles, world, {});
     setPlan({ owner: arm, result });
-    setPlaying(result.status === "success");
+    // Kinematic replay only when the dynamics is off; under "Track plan" the
+    // simulated controller follows the trajectory instead.
+    setPlaying(result.status === "success" && simModeRef.current === "off");
+    trackProgressRef.current = 0;
   }, [arm, planGoal, jointAngles, world]);
+
+  const nudge = useCallback(() => {
+    const state = simStateRef.current;
+    if (state) {
+      simStateRef.current = { ...state, qd: state.qd.map((value) => value + (Math.random() - 0.5) * 3) };
+    }
+  }, []);
 
   // Replays the planned path by interpolating the waypoints at constant
   // joint-space speed; each frame flows through the normal FK pipeline.
@@ -168,6 +213,80 @@ export default function App() {
     handle = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(handle);
   }, [playing, plan, arm]);
+
+  // Ref mirror so the dynamics loop reads the latest plan without re-arming.
+  const planRef = useRef(plan);
+  planRef.current = plan;
+
+  // The dynamics loop: one WASM `simulate` call per animation frame, substepped
+  // at 1 ms inside C++. The loop owns the state; React only displays it.
+  useEffect(() => {
+    if (!arm || simMode === "off") {
+      return undefined;
+    }
+    if (!simStateRef.current || simStateRef.current.owner !== arm) {
+      simStateRef.current = { owner: arm, q: [...jointAngles], qd: jointAngles.map(() => 0) };
+    }
+    trackProgressRef.current = 0;
+
+    let handle = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      handle = requestAnimationFrame(tick);
+      const dt = Math.min((now - last) / 1000, 0.05);
+      last = now;
+      const state = simStateRef.current;
+      if (!state || dt <= 0) {
+        return;
+      }
+
+      const options: SimulateOptions = { controller: simMode, duration: dt };
+      if (simMode === "pd") {
+        const target = simTargetRef.current;
+        options.qRef = target && target.owner === arm ? target.angles : state.q;
+      } else if (simMode === "track") {
+        const current = planRef.current;
+        const path =
+          current?.owner === arm && current.result.status === "success"
+            ? current.result.optimizedPath
+            : null;
+        if (path && path.length > 1) {
+          // Advance along the waypoints at constant joint-space speed and hand
+          // the controller position + velocity feedforward for the segment.
+          trackProgressRef.current += PLAYBACK_SPEED * dt;
+          let travelled = trackProgressRef.current;
+          let segment = 1;
+          let length = 0;
+          for (; segment < path.length - 1; segment += 1) {
+            length = Math.hypot(...path[segment].map((v, j) => v - path[segment - 1][j]));
+            if (travelled <= length) {
+              break;
+            }
+            travelled -= length;
+          }
+          length = Math.hypot(...path[segment].map((v, j) => v - path[segment - 1][j]));
+          const t = length > 0 ? Math.min(travelled / length, 1) : 1;
+          const from = path[segment - 1];
+          const to = path[segment];
+          options.qRef = from.map((v, j) => v + t * (to[j] - v));
+          const done = segment === path.length - 1 && t >= 1;
+          if (!done && length > 0) {
+            options.qdRef = to.map((v, j) => ((v - from[j]) / length) * PLAYBACK_SPEED);
+          }
+        } else {
+          options.qRef = state.q;
+        }
+      }
+
+      const result = arm.simulate(state.q, state.qd, options);
+      simStateRef.current = { owner: arm, q: result.position, qd: result.velocity };
+      setEdited({ owner: arm, angles: result.position });
+    };
+    handle = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(handle);
+    // jointAngles is only the seed at enable time; the loop owns it afterwards.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [arm, simMode]);
 
   // FK, manipulability and the ellipsoid are cheap enough to recompute per change.
   const pose = useMemo(
@@ -236,6 +355,23 @@ export default function App() {
     }
   }, [arm, planGoal, plan]);
 
+  const simHint = useMemo(() => {
+    switch (simMode) {
+      case "off":
+        return "Newton–Euler rigid-body dynamics at 1 ms substeps; pick a controller to hand the arm to physics.";
+      case "passive":
+        return "No actuation — the arm falls and swings under gravity against light joint friction. Presets and the gizmo pick it up and drop it.";
+      case "gravity":
+        return "τ = g(q): gravity is cancelled exactly, so the arm floats wherever you carry it — drag the gizmo or jump to a preset, then Nudge it and watch friction bleed the motion off.";
+      case "pd":
+        return "τ = g(q) + M(q)(Kp·e − Kd·q̇): sliders, presets and the gizmo now set the reference, and the arm chases it dynamically.";
+      case "track":
+        return "Computed torque: the model cancels the real dynamics and feeds the planned trajectory forward — the plan replays under physics.";
+      default:
+        return "";
+    }
+  }, [simMode]);
+
   const meshStatusHint = useMemo(() => {
     switch (meshStatus.state) {
       case "loading":
@@ -292,6 +428,7 @@ export default function App() {
           selectedObstacleId={selectedObstacleId}
           onObstacleMoved={handleObstacleMoved}
           plannedPaths={plannedPaths}
+          simulationActive={simMode !== "off"}
           ellipsoidMode={ellipsoidMode}
           displayMode={displayMode}
           onMeshStatus={handleMeshStatus}
@@ -355,7 +492,11 @@ export default function App() {
 
           <section className="panel__section">
             <h2>Joints (FK)</h2>
-            <JointSliders limits={jointLimits} angles={jointAngles} onChange={setJointAngles} />
+            <JointSliders
+              limits={jointLimits}
+              angles={simMode === "pd" && simTarget?.owner === arm ? simTarget.angles : jointAngles}
+              onChange={setJointAngles}
+            />
           </section>
 
           <section className="panel__section">
@@ -495,6 +636,40 @@ export default function App() {
             </div>
             <p className="hint" data-testid="plan-status">
               {planHint}
+            </p>
+          </section>
+
+          <section className="panel__section">
+            <h2>Dynamics</h2>
+            <div className="buttons">
+              {(
+                [
+                  ["off", "Off"],
+                  ["passive", "Passive"],
+                  ["gravity", "Gravity comp"],
+                  ["pd", "PD hold"],
+                  ["track", "Track plan"],
+                ] as [SimMode, string][]
+              ).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={simMode === mode ? "is-active" : ""}
+                  disabled={mode === "track" && !(plan?.owner === arm && plan.result.status === "success")}
+                  onClick={() => {
+                    trackProgressRef.current = 0;
+                    setSimMode(mode);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+              <button type="button" onClick={nudge} disabled={simMode === "off"}>
+                Nudge
+              </button>
+            </div>
+            <p className="hint" data-testid="sim-status">
+              {simHint}
             </p>
           </section>
 

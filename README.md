@@ -57,6 +57,7 @@ If you use VS Code, **Reopen in Container** with `.devcontainer/devcontainer.jso
 | Manipulability ellipsoid | Ellipsoid drawn at the EE — Linear / Angular / Off |
 | Collision capsules | Toggle the capsule collision body — turns red on any collision, tightest clearance shown in mm |
 | Motion planning | Add/drag sphere obstacles, store a goal pose, plan with RRT-Connect, replay the result |
+| Dynamics | Hand the arm to Newton–Euler physics: Passive / Gravity comp / PD hold / Track plan, plus a Nudge disturbance |
 | IK solver buttons | Switch between Box QP and DLS + clamp — compare while dragging |
 | Robot buttons | Switch between UR5 (6 DOF) and FR3 (7 DOF) |
 | Display buttons | Switch between Meshes (real manufacturer meshes) and Schematic (link/joint diagram) |
@@ -82,6 +83,9 @@ cpp/
     collision/world.hpp         # obstacle world + self/obstacle contact queries
     planning/rrt_connect.hpp    # RRT-Connect + shortcut smoothing (joint space)
     planning/trajectory_optimizer.hpp # CHOMP-style smoothing on top of box_qp
+    dynamics/inertia.hpp        # capsule-derived link inertias (one body source)
+    dynamics/newton_euler.hpp   # RNEA: inverse/forward dynamics · M(q) · energies
+    dynamics/simulation.hpp     # symplectic Euler sim + torque controllers
     solvers/box_qp.hpp          # box-constrained QP (projected Gauss–Seidel)
     solvers/inverse_kinematics.hpp
     models/ur5.hpp              # UR5 (6 DOF)
@@ -373,6 +377,53 @@ In the viewer: **Add obstacle** drops a draggable sphere, **Set goal = current**
 **Plan path** runs the planner from the current pose, and three end-effector traces appear —
 raw RRT (dim grey), shortcut (yellow), optimized (bright cyan). The optimized path is the one
 that replays.
+
+---
+
+## Dynamics and control
+
+### One body, three uses
+
+The dynamics does not import a URDF's inertia tags. Each link's **published mass**
+(`ur_description` for the UR5; the identified Panda set from `franka_description` for the FR3) is
+spread uniformly over the **same capsule the collision model uses**, giving an analytic COM and
+tensor (`dynamics/inertia.hpp`). Geometry, collision and dynamics therefore describe one body —
+approximate, but self-consistent, and every constant is derivable from the code itself.
+
+### Newton–Euler (`dynamics/newton_euler.hpp`)
+
+The recursive Newton–Euler algorithm of Modern Robotics chapter 8, run in each link's own frame:
+twists and accelerations propagate outward, wrenches propagate back, and gravity enters as the
+standard fictitious base acceleration. Everything else is built from it:
+
+- `gravity_torque` — RNEA with zero motion;
+- `bias_torque` — RNEA with zero acceleration (Coriolis + gravity);
+- `mass_matrix` — one RNEA per unit acceleration column;
+- `forward_dynamics` — `M(q) qdd = τ - bias`, solved by LDLT.
+
+Correctness is pinned by tests that cross independent code paths: the gravity torque must equal
+the finite-difference gradient of the potential energy, `0.5 qd^T M qd` must match the energy
+summed link by link from finite-difference twists, forward∘inverse must be the identity, and the
+undamped passive arm must conserve energy over 500 steps.
+
+### Simulation and controllers (`dynamics/simulation.hpp`)
+
+Semi-implicit (symplectic) Euler at 1 ms substeps — the reason the passive arm swings indefinitely
+instead of gaining energy — with joint limits as inelastic stops. Four controllers, in increasing
+order of model use:
+
+| Controller | Law | What it demonstrates |
+| --- | --- | --- |
+| Passive | `τ = 0` | The plant itself: falling, swinging, friction |
+| Gravity comp | `τ = g(q)` | Exact cancellation: the arm floats anywhere |
+| PD hold | `τ = g(q) + M(q)(Kp e − Kd q̇)` | Mass-shaped gains: one gain pair fits every joint |
+| Track plan | `τ = M(q)(q̈_ref + Kp e + Kd ė) + C q̇ + g(q)` | Computed torque: the plan replays under physics |
+
+The PD gains are shaped by `M(q)` deliberately: a fixed scalar gain that behaves on the 8 kg
+upper arm exceeds the explicit integrator's stability bound on the nearly massless wrist — the
+first unshaped implementation blew up in exactly that way, and the test suite now encodes the
+lesson. Computed torque differs from PD by feeding the reference motion forward and cancelling
+Coriolis forces, which is what turns "arrives eventually" into "tracks".
 
 ---
 

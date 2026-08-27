@@ -7,6 +7,7 @@ add_executable(robotics_tests
     test_collision.cpp
     test_planning.cpp
     test_trajectory_optimizer.cpp
+    test_dynamics.cpp
     test_solvers.cpp
     test_robot_registry.cpp
 )

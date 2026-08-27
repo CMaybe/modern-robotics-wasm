@@ -56,6 +56,7 @@ VS Code를 쓴다면 `.devcontainer/devcontainer.json` 으로 **Reopen in Contai
 | Manipulability ellipsoid | EE에 그려지는 조작성 타원체 — Linear / Angular / Off |
 | Collision capsules | 충돌 모델(캡슐) 오버레이 토글 — 충돌 시 빨간색으로 표시, 최소 여유가 mm로 표시됨 |
 | Motion planning | 구 장애물 추가·드래그, 목표 자세 저장, RRT-Connect로 계획, 결과 재생 |
+| Dynamics | Newton–Euler 물리로 팔을 넘김: Passive / Gravity comp / PD hold / Track plan + Nudge 외란 |
 | IK solver 버튼 | Box QP / DLS + clamp 전환 — 드래그하며 차이를 비교 |
 | Robot 버튼 | UR5 (6 DOF) / FR3 (7 DOF) 전환 |
 | Display 버튼 | Meshes (제조사 실제 메시) / Schematic (링크·조인트 도식) 전환 |
@@ -80,6 +81,9 @@ cpp/
     collision/world.hpp         # 장애물 월드 + 자기/장애물 충돌 쿼리
     planning/rrt_connect.hpp    # RRT-Connect + shortcut 스무딩 (관절 공간)
     planning/trajectory_optimizer.hpp # box_qp를 재사용하는 CHOMP식 스무딩
+    dynamics/inertia.hpp        # 캡슐에서 유도한 링크 관성 (몸체 소스 단일화)
+    dynamics/newton_euler.hpp   # RNEA: 역/전방 동역학 · M(q) · 에너지
+    dynamics/simulation.hpp     # symplectic Euler 시뮬 + 토크 컨트롤러
     solvers/box_qp.hpp          # box 제약 QP (projected Gauss–Seidel)
     solvers/inverse_kinematics.hpp
     models/ur5.hpp              # UR5 (6 DOF)
@@ -348,6 +352,49 @@ $$w_s\big(\lVert q - q_{prev}\rVert^2 + \lVert q_{next} - q\rVert^2\big)
 뷰어에서는 **Add obstacle** 로 드래그 가능한 구를 놓고, **Set goal = current** 로 목표를 저장한 뒤,
 **Plan path** 를 누르면 EE 궤적 세 개가 그려집니다 — 원시 RRT(어두운 회색), shortcut(노랑),
 optimized(밝은 청록). 재생되는 것은 optimized 경로입니다.
+
+---
+
+## 동역학과 제어
+
+### 몸체 하나, 용도 셋
+
+동역학은 URDF의 inertia 태그를 가져오지 않습니다. 각 링크의 **공개된 질량**(UR5는
+`ur_description`, FR3는 `franka_description`의 식별된 Panda 값)을 **충돌 모델과 같은 캡슐**에
+균일하게 분포시켜 COM과 관성텐서를 해석적으로 얻습니다 (`dynamics/inertia.hpp`). 기하 · 충돌 ·
+동역학이 하나의 몸체를 공유합니다 — 근사이지만 자기일관적이고, 모든 상수가 코드에서 유도됩니다.
+
+### Newton–Euler (`dynamics/newton_euler.hpp`)
+
+Modern Robotics 8장의 재귀 Newton–Euler를 각 링크 프레임에서 수행합니다: 트위스트와 가속도는
+바깥쪽으로, 렌치는 안쪽으로 전파되고, 중력은 표준적인 가상 베이스 가속도로 들어갑니다.
+나머지는 전부 이것으로 만듭니다:
+
+- `gravity_torque` — 정지 상태 RNEA
+- `bias_torque` — 가속도 0의 RNEA (Coriolis + 중력)
+- `mass_matrix` — 단위 가속도별 RNEA 한 번씩
+- `forward_dynamics` — `M(q) qdd = τ − bias` 를 LDLT로 풀기
+
+정합성은 독립 경로를 교차 검증하는 테스트로 고정했습니다: 중력 토크 = 위치에너지의 유한차분
+그래디언트, `0.5 q̇ᵀM q̇` = 링크별 유한차분 트위스트로 합산한 에너지, 전방∘역 = 항등,
+비감쇠 수동 팔의 에너지 보존(500 스텝).
+
+### 시뮬레이션과 컨트롤러 (`dynamics/simulation.hpp`)
+
+1 ms 서브스텝의 semi-implicit(symplectic) Euler — 수동 팔이 에너지를 얻지 않고 계속 흔들리는
+이유 — 이고, 관절 리밋은 비탄성 정지로 처리합니다. 모델 사용량 순서로 컨트롤러 넷:
+
+| 컨트롤러 | 법칙 | 보여주는 것 |
+| --- | --- | --- |
+| Passive | `τ = 0` | 플랜트 그 자체: 낙하, 진자 운동, 마찰 |
+| Gravity comp | `τ = g(q)` | 정확한 상쇄: 팔이 어디서든 뜸 |
+| PD hold | `τ = g(q) + M(q)(Kp e − Kd q̇)` | 질량 성형 게인: 게인 한 쌍이 전 관절에 맞음 |
+| Track plan | `τ = M(q)(q̈_ref + Kp e + Kd ė) + C q̇ + g(q)` | Computed torque: 계획이 물리로 재생됨 |
+
+PD 게인을 `M(q)` 로 성형한 것은 의도적입니다: 8 kg 상완에 맞춘 고정 스칼라 게인은 거의 질량이
+없는 손목에서 명시적 적분기의 안정 한계를 넘습니다 — 실제로 성형 없는 첫 구현이 정확히 그렇게
+발산했고, 그 교훈이 테스트로 남아 있습니다. Computed torque는 PD와 달리 기준 운동을 피드포워드
+하고 Coriolis를 상쇄하는데, 그 차이가 "언젠가 도착"을 "추종"으로 바꿉니다.
 
 ---
 

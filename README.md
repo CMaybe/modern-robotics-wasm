@@ -44,6 +44,23 @@ If you use VS Code, **Reopen in Container** with `.devcontainer/devcontainer.jso
 
 ---
 
+## GitHub Pages deployment
+
+Every push to `main` runs `.github/workflows/deploy-pages.yaml`, which builds WebAssembly and deploys the static web app to GitHub Pages.
+Set **Settings > Pages > Build and deployment** to **GitHub Actions** once for this repository.
+
+The deployed app is available at <https://cmaybe.github.io/modern-robotics-wasm/>. Embed it in a Docusaurus blog post with this MDX:
+
+```mdx
+<iframe
+  src="https://cmaybe.github.io/modern-robotics-wasm/"
+  title="Modern Robotics WASM viewer"
+  style={{width: '100%', height: '760px', border: 0}}
+/>
+```
+
+---
+
 ## Controls
 
 | Control | Action |

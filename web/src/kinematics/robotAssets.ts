@@ -19,10 +19,12 @@ export interface RobotAsset {
   tipLink: string;
 }
 
+const assetUrl = (path: string) => new URL(path, window.location.href).toString();
+
 export const ROBOT_ASSETS: Record<string, RobotAsset> = {
   ur5: {
-    urdf: "/robots/ur5/ur5.urdf",
-    packages: { ur_description: "/robots/ur5" },
+    urdf: assetUrl("robots/ur5/ur5.urdf"),
+    packages: { ur_description: assetUrl("robots/ur5/") },
     joints: [
       "shoulder_pan_joint",
       "shoulder_lift_joint",
@@ -34,8 +36,8 @@ export const ROBOT_ASSETS: Record<string, RobotAsset> = {
     tipLink: "tool0",
   },
   fr3: {
-    urdf: "/robots/fr3/fr3.urdf",
-    packages: { franka_description: "/robots/fr3" },
+    urdf: assetUrl("robots/fr3/fr3.urdf"),
+    packages: { franka_description: assetUrl("robots/fr3/") },
     joints: [
       "fr3_joint1",
       "fr3_joint2",

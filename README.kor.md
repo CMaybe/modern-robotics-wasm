@@ -43,6 +43,23 @@ VS Code를 쓴다면 `.devcontainer/devcontainer.json` 으로 **Reopen in Contai
 
 ---
 
+## GitHub Pages 배포
+
+`main` 브랜치에 푸시하면 `.github/workflows/deploy-pages.yaml` 이 WebAssembly와 정적 웹 앱을 빌드해 GitHub Pages에 배포합니다.
+저장소의 **Settings > Pages > Build and deployment** 에서 Source를 **GitHub Actions** 로 한 번 설정하세요.
+
+배포 URL은 <https://cmaybe.github.io/modern-robotics-wasm/> 입니다. Docusaurus 블로그 글에는 다음 MDX를 넣어 인터랙티브 데모를 임베드할 수 있습니다.
+
+```mdx
+<iframe
+  src="https://cmaybe.github.io/modern-robotics-wasm/"
+  title="Modern Robotics WASM viewer"
+  style={{width: '100%', height: '760px', border: 0}}
+/>
+```
+
+---
+
 ## 조작 방법
 
 | 조작 | 동작 |

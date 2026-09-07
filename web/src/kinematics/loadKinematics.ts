@@ -9,8 +9,8 @@ import type { KinematicsModule } from "./types";
  * what the browser runs — no bundler rewriting of its wasm fetch path.
  */
 
-const SCRIPT_URL = "/wasm/kinematics.js";
-const WASM_DIR = "/wasm/";
+const SCRIPT_URL = new URL("wasm/kinematics.js", window.location.href).toString();
+const WASM_DIR = new URL("wasm/", window.location.href).toString();
 
 type ModuleFactory = (overrides?: {
   locateFile?: (path: string, prefix: string) => string;

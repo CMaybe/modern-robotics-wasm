@@ -49,6 +49,14 @@ jobs:
             modern-robotics-wasm:pages \
             scripts/build_wasm.sh
 
+      - name: Fetch robot meshes
+        run: |
+          docker run --rm \
+            -v "${PWD}:/home/robotics/modern-robotics-wasm" \
+            -w /home/robotics/modern-robotics-wasm \
+            modern-robotics-wasm:pages \
+            scripts/fetch_meshes.sh
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20

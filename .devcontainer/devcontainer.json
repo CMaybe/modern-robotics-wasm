@@ -1,47 +1,57 @@
 {
-  "name": "dev-modern-robotics-wasm",
-  "build": {
-    "dockerfile": "../docker/Dockerfile",
-    "context": "..",
-    "args": {
-      "USER_UID": "${localEnv:UID:1000}",
-      "USER_GID": "${localEnv:GID:1000}"
+    "name": "dev-modern-robotics-wasm",
+    "build": {
+        "dockerfile": "../docker/Dockerfile",
+        "context": "..",
+        "args": {
+            "USER_UID": "${localEnv:UID:1000}",
+            "USER_GID": "${localEnv:GID:1000}"
+        }
+    },
+    "workspaceFolder": "/home/robotics/modern-robotics-wasm",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/home/robotics/modern-robotics-wasm,type=bind",
+    "mounts": [
+        "source=/home/${localEnv:USER}/.ssh/,target=/home/${localEnv:USER}/.ssh/,type=bind,readonly"
+    ],
+    "containerEnv": {
+        "DISPLAY": "${localEnv:DISPLAY}"
+    },
+    "forwardPorts": [
+        3000
+    ],
+    "portsAttributes": {
+        "3000": {
+            "label": "webpack dev server",
+            "onAutoForward": "notify"
+        }
+    },
+    "runArgs": [
+        "--name",
+        "dev-modern-robotics-wasm",
+        "--cap-add=SYS_PTRACE",
+        "--security-opt=seccomp=unconfined"
+    ],
+    "customizations": {
+        "vscode": {
+            "settings": {
+                "editor.detectIndentation": false,
+                "editor.insertSpaces": true,
+                "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+                "C_Cpp.default.includePath": [
+                    "${workspaceFolder}/cpp/kinematics/include",
+                    "/usr/local/include",
+                    "/usr/local/include/eigen3"
+                ]
+            },
+            "extensions": [
+                "twxs.cmake",
+                "xaver.clang-format",
+                "ms-vscode.cpptools-extension-pack",
+                "ms-vscode-remote.vscode-remote-extensionpack",
+                "dbaeumer.vscode-eslint",
+                "esbenp.prettier-vscode",
+                "mhutchie.git-graph"
+            ]
+        }
     }
-  },
-  "workspaceFolder": "/home/robotics/modern-robotics-wasm",
-  "workspaceMount": "source=${localWorkspaceFolder},target=/home/robotics/modern-robotics-wasm,type=bind",
-  "containerEnv": {
-    "DISPLAY": "${localEnv:DISPLAY}"
-  },
-  "forwardPorts": [3000],
-  "portsAttributes": {
-    "3000": {
-      "label": "webpack dev server",
-      "onAutoForward": "notify"
-    }
-  },
-  "runArgs": ["--name", "dev-modern-robotics-wasm", "--cap-add=SYS_PTRACE", "--security-opt=seccomp=unconfined"],
-  "customizations": {
-    "vscode": {
-      "settings": {
-        "editor.detectIndentation": false,
-        "editor.insertSpaces": true,
-        "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
-        "C_Cpp.default.includePath": [
-          "${workspaceFolder}/cpp/kinematics/include",
-          "/usr/local/include",
-          "/usr/local/include/eigen3"
-        ]
-      },
-      "extensions": [
-        "twxs.cmake",
-        "xaver.clang-format",
-        "ms-vscode.cpptools-extension-pack",
-        "ms-vscode-remote.vscode-remote-extensionpack",
-        "dbaeumer.vscode-eslint",
-        "esbenp.prettier-vscode",
-        "mhutchie.git-graph"
-      ]
-    }
-  }
 }

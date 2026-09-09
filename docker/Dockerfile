@@ -28,6 +28,7 @@ RUN apt-get update \
     gdb \
     gnupg2 \
     less \
+    openssh-client \
     sudo \
     tmux \
     vim \

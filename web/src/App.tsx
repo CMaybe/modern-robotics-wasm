@@ -46,45 +46,73 @@ const BASE_IK_OPTIONS: IkOptions = {
 
 export default function App() {
   const [robotId, setRobotId] = useState("ur5");
-  const { robots, arm, jointLimits, presets, error, loading } = useKinematics(robotId);
+  const { robots, arm, jointLimits, presets, error, loading } =
+    useKinematics(robotId);
 
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
   const [showJointAxes, setShowJointAxes] = useState(true);
   const [showCollision, setShowCollision] = useState(false);
   const [ellipsoidMode, setEllipsoidMode] = useState<EllipsoidMode>("linear");
   const [displayMode, setDisplayMode] = useState<DisplayMode>("mesh");
-  const [meshStatus, setMeshStatus] = useState<MeshStatus>({ state: "loading" });
+  const [meshStatus, setMeshStatus] = useState<MeshStatus>({
+    state: "loading",
+  });
   const [ikResult, setIkResult] = useState<IkResult | null>(null);
   const [ikMethod, setIkMethod] = useState<IkMethod>("qp");
-  const ikOptions = useMemo<IkOptions>(() => ({ ...BASE_IK_OPTIONS, method: ikMethod }), [ikMethod]);
+  const ikOptions = useMemo<IkOptions>(
+    () => ({ ...BASE_IK_OPTIONS, method: ikMethod }),
+    [ikMethod],
+  );
 
   // Obstacles live in the world frame, so they survive a robot switch.
   const [obstacles, setObstacles] = useState<ViewerObstacle[]>([]);
-  const [selectedObstacleId, setSelectedObstacleId] = useState<number | null>(null);
+  const [selectedObstacleId, setSelectedObstacleId] = useState<number | null>(
+    null,
+  );
   const nextObstacleIdRef = useRef(1);
   const world = useMemo<ObstacleWorld>(
-    () => ({ spheres: obstacles.map(({ center, radius }) => ({ center, radius })) }),
+    () => ({
+      spheres: obstacles.map(({ center, radius }) => ({ center, radius })),
+    }),
     [obstacles],
   );
 
   // Planner state is owned by the arm that produced it, like the joint angles.
-  const [planGoal, setPlanGoal] = useState<{ owner: Robot; angles: number[] } | null>(null);
-  const [plan, setPlan] = useState<{ owner: Robot; result: PlanResult } | null>(null);
+  const [planGoal, setPlanGoal] = useState<{
+    owner: Robot;
+    angles: number[];
+  } | null>(null);
+  const [plan, setPlan] = useState<{ owner: Robot; result: PlanResult } | null>(
+    null,
+  );
   const [playing, setPlaying] = useState(false);
 
   // Joint angles are owned by whichever arm produced them. Tagging them with that
   // arm means switching robots falls back to the new default instead of rendering
   // a configuration of the wrong length for a frame.
-  const [edited, setEdited] = useState<{ owner: Robot; angles: number[] } | null>(null);
-  const defaults = useMemo(() => (arm ? arm.defaultConfiguration() : []), [arm]);
+  const [edited, setEdited] = useState<{
+    owner: Robot;
+    angles: number[];
+  } | null>(null);
+  const defaults = useMemo(
+    () => (arm ? arm.defaultConfiguration() : []),
+    [arm],
+  );
   const jointAngles = edited && edited.owner === arm ? edited.angles : defaults;
 
   // Dynamics simulation. While it runs, the displayed configuration is the sim
   // state and every pose input (sliders, presets, the IK gizmo) becomes the
   // reference the controller chases instead of teleporting the arm.
   const [simMode, setSimMode] = useState<SimMode>("off");
-  const [simTarget, setSimTarget] = useState<{ owner: Robot; angles: number[] } | null>(null);
-  const simStateRef = useRef<{ owner: Robot; q: number[]; qd: number[] } | null>(null);
+  const [simTarget, setSimTarget] = useState<{
+    owner: Robot;
+    angles: number[];
+  } | null>(null);
+  const simStateRef = useRef<{
+    owner: Robot;
+    q: number[];
+    qd: number[];
+  } | null>(null);
   const simModeRef = useRef(simMode);
   simModeRef.current = simMode;
   const simTargetRef = useRef(simTarget);
@@ -110,7 +138,11 @@ export default function App() {
         // Passive, gravity comp, track: pose inputs carry the simulated body
         // itself, the way you would hand-guide a gravity-compensated arm.
         // Velocity clears so it stays (or falls, or gets pulled back) from there.
-        simStateRef.current = { owner: arm, q: [...angles], qd: angles.map(() => 0) };
+        simStateRef.current = {
+          owner: arm,
+          q: [...angles],
+          qd: angles.map(() => 0),
+        };
         setSimTarget({ owner: arm, angles });
         setEdited({ owner: arm, angles });
       }
@@ -118,8 +150,14 @@ export default function App() {
     [arm],
   );
 
-  const handleIkResult = useCallback((result: IkResult | null) => setIkResult(result), []);
-  const handleMeshStatus = useCallback((status: MeshStatus) => setMeshStatus(status), []);
+  const handleIkResult = useCallback(
+    (result: IkResult | null) => setIkResult(result),
+    [],
+  );
+  const handleMeshStatus = useCallback(
+    (status: MeshStatus) => setMeshStatus(status),
+    [],
+  );
 
   const addObstacle = useCallback(() => {
     const id = nextObstacleIdRef.current;
@@ -137,17 +175,24 @@ export default function App() {
     setSelectedObstacleId(null);
   }, [selectedObstacleId]);
 
-  const handleObstacleMoved = useCallback((id: number, center: [number, number, number]) => {
-    setObstacles((current) =>
-      current.map((obstacle) => (obstacle.id === id ? { ...obstacle, center } : obstacle)),
-    );
-  }, []);
+  const handleObstacleMoved = useCallback(
+    (id: number, center: [number, number, number]) => {
+      setObstacles((current) =>
+        current.map((obstacle) =>
+          obstacle.id === id ? { ...obstacle, center } : obstacle,
+        ),
+      );
+    },
+    [],
+  );
 
   const setSelectedRadius = useCallback(
     (radius: number) => {
       setObstacles((current) =>
         current.map((obstacle) =>
-          obstacle.id === selectedObstacleId ? { ...obstacle, radius } : obstacle,
+          obstacle.id === selectedObstacleId
+            ? { ...obstacle, radius }
+            : obstacle,
         ),
       );
     },
@@ -170,23 +215,35 @@ export default function App() {
   const nudge = useCallback(() => {
     const state = simStateRef.current;
     if (state) {
-      simStateRef.current = { ...state, qd: state.qd.map((value) => value + (Math.random() - 0.5) * 3) };
+      simStateRef.current = {
+        ...state,
+        qd: state.qd.map((value) => value + (Math.random() - 0.5) * 3),
+      };
     }
   }, []);
 
   // Replays the planned path by interpolating the waypoints at constant
   // joint-space speed; each frame flows through the normal FK pipeline.
   useEffect(() => {
-    if (!playing || !arm || plan?.owner !== arm || plan.result.status !== "success") {
+    if (
+      !playing ||
+      !arm ||
+      plan?.owner !== arm ||
+      plan.result.status !== "success"
+    ) {
       return undefined;
     }
     // Replay the optimized path — it falls back to the densified shortcut when
     // the optimizer's validation failed, so it is always safe to follow.
-    const path = plan.result.optimizedPath.length > 1 ? plan.result.optimizedPath : plan.result.path;
+    const path =
+      plan.result.optimizedPath.length > 1
+        ? plan.result.optimizedPath
+        : plan.result.path;
     const cumulative = [0];
     for (let i = 1; i < path.length; i += 1) {
       cumulative.push(
-        cumulative[i - 1] + Math.hypot(...path[i].map((value, j) => value - path[i - 1][j])),
+        cumulative[i - 1] +
+          Math.hypot(...path[i].map((value, j) => value - path[i - 1][j])),
       );
     }
     const total = cumulative[cumulative.length - 1];
@@ -206,7 +263,9 @@ export default function App() {
       }
       const span = cumulative[segment] - cumulative[segment - 1];
       const t = span > 0 ? (travelled - cumulative[segment - 1]) / span : 1;
-      const angles = path[segment - 1].map((value, j) => value + t * (path[segment][j] - value));
+      const angles = path[segment - 1].map(
+        (value, j) => value + t * (path[segment][j] - value),
+      );
       setEdited({ owner: arm, angles });
       handle = requestAnimationFrame(tick);
     };
@@ -225,7 +284,11 @@ export default function App() {
       return undefined;
     }
     if (!simStateRef.current || simStateRef.current.owner !== arm) {
-      simStateRef.current = { owner: arm, q: [...jointAngles], qd: jointAngles.map(() => 0) };
+      simStateRef.current = {
+        owner: arm,
+        q: [...jointAngles],
+        qd: jointAngles.map(() => 0),
+      };
     }
     trackProgressRef.current = 0;
 
@@ -258,20 +321,26 @@ export default function App() {
           let segment = 1;
           let length = 0;
           for (; segment < path.length - 1; segment += 1) {
-            length = Math.hypot(...path[segment].map((v, j) => v - path[segment - 1][j]));
+            length = Math.hypot(
+              ...path[segment].map((v, j) => v - path[segment - 1][j]),
+            );
             if (travelled <= length) {
               break;
             }
             travelled -= length;
           }
-          length = Math.hypot(...path[segment].map((v, j) => v - path[segment - 1][j]));
+          length = Math.hypot(
+            ...path[segment].map((v, j) => v - path[segment - 1][j]),
+          );
           const t = length > 0 ? Math.min(travelled / length, 1) : 1;
           const from = path[segment - 1];
           const to = path[segment];
           options.qRef = from.map((v, j) => v + t * (to[j] - v));
           const done = segment === path.length - 1 && t >= 1;
           if (!done && length > 0) {
-            options.qdRef = to.map((v, j) => ((v - from[j]) / length) * PLAYBACK_SPEED);
+            options.qdRef = to.map(
+              (v, j) => ((v - from[j]) / length) * PLAYBACK_SPEED,
+            );
           }
         } else {
           options.qRef = state.q;
@@ -279,7 +348,11 @@ export default function App() {
       }
 
       const result = arm.simulate(state.q, state.qd, options);
-      simStateRef.current = { owner: arm, q: result.position, qd: result.velocity };
+      simStateRef.current = {
+        owner: arm,
+        q: result.position,
+        qd: result.velocity,
+      };
       setEdited({ owner: arm, angles: result.position });
     };
     handle = requestAnimationFrame(tick);
@@ -290,11 +363,15 @@ export default function App() {
 
   // FK, manipulability and the ellipsoid are cheap enough to recompute per change.
   const pose = useMemo(
-    () => (arm && jointAngles.length === arm.dof() ? arm.forward(jointAngles) : null),
+    () =>
+      arm && jointAngles.length === arm.dof() ? arm.forward(jointAngles) : null,
     [arm, jointAngles],
   );
   const manipulability = useMemo(
-    () => (arm && jointAngles.length === arm.dof() ? arm.manipulability(jointAngles) : 0),
+    () =>
+      arm && jointAngles.length === arm.dof()
+        ? arm.manipulability(jointAngles)
+        : 0,
     [arm, jointAngles],
   );
   const ellipsoid = useMemo(() => {
@@ -316,7 +393,8 @@ export default function App() {
     [arm, jointAngles, showCollision, world],
   );
 
-  const selectedObstacle = obstacles.find((obstacle) => obstacle.id === selectedObstacleId) ?? null;
+  const selectedObstacle =
+    obstacles.find((obstacle) => obstacle.id === selectedObstacleId) ?? null;
 
   const plannedPaths = useMemo(
     () =>
@@ -385,12 +463,16 @@ export default function App() {
       case "absent":
         return meshStatus.message ?? "No meshes registered for this robot.";
       default:
-        return meshStatus.message ?? "Meshes unavailable — showing the schematic.";
+        return (
+          meshStatus.message ?? "Meshes unavailable — showing the schematic."
+        );
     }
   }, [meshStatus]);
 
   if (loading) {
-    return <div className="status">Loading the WebAssembly kinematics module…</div>;
+    return (
+      <div className="status">Loading the WebAssembly kinematics module…</div>
+    );
   }
 
   if (error || !arm || !pose) {
@@ -408,11 +490,24 @@ export default function App() {
   return (
     <div className="app">
       <header className="app__header">
-        <h1>Forward &amp; inverse kinematics — {arm.label()}</h1>
-        <p>
-          Product-of-exponentials kinematics in C++ (Eigen + Sophus), compiled to WebAssembly and
-          rendered with WebGL. Drag a slider for FK; drag the end-effector gizmo for IK.
-        </p>
+        <div className="app__headerRow">
+          <div>
+            <h1>Forward &amp; inverse kinematics — {arm.label()}</h1>
+            <p>
+              Product-of-exponentials kinematics in C++ (Eigen + Sophus),
+              compiled to WebAssembly and rendered with WebGL. Drag a slider for
+              FK; drag the end-effector gizmo for IK.
+            </p>
+          </div>
+          <a
+            className="app__github"
+            href="https://github.com/cmaybe/modern-robotics-wasm"
+            target="_blank"
+            rel="noreferrer"
+          >
+            GitHub
+          </a>
+        </div>
       </header>
 
       <main className="app__body">
@@ -494,7 +589,11 @@ export default function App() {
             <h2>Joints (FK)</h2>
             <JointSliders
               limits={jointLimits}
-              angles={simMode === "pd" && simTarget?.owner === arm ? simTarget.angles : jointAngles}
+              angles={
+                simMode === "pd" && simTarget?.owner === arm
+                  ? simTarget.angles
+                  : jointAngles
+              }
               onChange={setJointAngles}
             />
           </section>
@@ -545,10 +644,12 @@ export default function App() {
               ))}
             </div>
             <p className="hint">
-              Both minimise the same local model of the task error. <strong>Box QP</strong> treats
-              the joint limits as constraints on the step, so a joint that saturates hands its
-              share of the motion to the others. <strong>DLS + clamp</strong> solves as if the
-              joints were unbounded and truncates afterwards, which loses that redistribution.
+              Both minimise the same local model of the task error.{" "}
+              <strong>Box QP</strong> treats the joint limits as constraints on
+              the step, so a joint that saturates hands its share of the motion
+              to the others. <strong>DLS + clamp</strong> solves as if the
+              joints were unbounded and truncates afterwards, which loses that
+              redistribution.
             </p>
           </section>
 
@@ -573,9 +674,9 @@ export default function App() {
               ))}
             </div>
             <p className="hint">
-              The image of the unit ball of joint velocities, drawn at the end-effector. A long
-              axis is a direction the tool moves easily; a flat one is a direction it barely moves
-              at all.
+              The image of the unit ball of joint velocities, drawn at the
+              end-effector. A long axis is a direction the tool moves easily; a
+              flat one is a direction it barely moves at all.
             </p>
           </section>
 
@@ -585,7 +686,11 @@ export default function App() {
               <button type="button" onClick={addObstacle}>
                 Add obstacle
               </button>
-              <button type="button" onClick={removeSelectedObstacle} disabled={obstacles.length === 0}>
+              <button
+                type="button"
+                onClick={removeSelectedObstacle}
+                disabled={obstacles.length === 0}
+              >
                 Remove
               </button>
             </div>
@@ -595,9 +700,13 @@ export default function App() {
                   <button
                     key={obstacle.id}
                     type="button"
-                    className={obstacle.id === selectedObstacleId ? "is-active" : ""}
+                    className={
+                      obstacle.id === selectedObstacleId ? "is-active" : ""
+                    }
                     onClick={() =>
-                      setSelectedObstacleId(obstacle.id === selectedObstacleId ? null : obstacle.id)
+                      setSelectedObstacleId(
+                        obstacle.id === selectedObstacleId ? null : obstacle.id,
+                      )
                     }
                   >
                     #{index + 1} · r {(obstacle.radius * 100).toFixed(0)} cm
@@ -609,7 +718,9 @@ export default function App() {
               <label className="slider">
                 <span className="slider__label">
                   <span className="slider__name">obstacle radius</span>
-                  <span className="slider__value">{(selectedObstacle.radius * 100).toFixed(0)} cm</span>
+                  <span className="slider__value">
+                    {(selectedObstacle.radius * 100).toFixed(0)} cm
+                  </span>
                 </span>
                 <input
                   type="range"
@@ -617,19 +728,31 @@ export default function App() {
                   max={0.3}
                   step={0.01}
                   value={selectedObstacle.radius}
-                  onChange={(event) => setSelectedRadius(Number(event.target.value))}
+                  onChange={(event) =>
+                    setSelectedRadius(Number(event.target.value))
+                  }
                 />
               </label>
             )}
             <div className="buttons">
-              <button type="button" onClick={() => setPlanGoal({ owner: arm, angles: jointAngles })}>
+              <button
+                type="button"
+                onClick={() => setPlanGoal({ owner: arm, angles: jointAngles })}
+              >
                 Set goal = current
               </button>
-              <button type="button" onClick={runPlan} disabled={planGoal?.owner !== arm}>
+              <button
+                type="button"
+                onClick={runPlan}
+                disabled={planGoal?.owner !== arm}
+              >
                 Plan path
               </button>
               {plan?.owner === arm && plan.result.status === "success" && (
-                <button type="button" onClick={() => setPlaying((value) => !value)}>
+                <button
+                  type="button"
+                  onClick={() => setPlaying((value) => !value)}
+                >
                   {playing ? "Stop" : "Replay"}
                 </button>
               )}
@@ -655,7 +778,10 @@ export default function App() {
                   key={mode}
                   type="button"
                   className={simMode === mode ? "is-active" : ""}
-                  disabled={mode === "track" && !(plan?.owner === arm && plan.result.status === "success")}
+                  disabled={
+                    mode === "track" &&
+                    !(plan?.owner === arm && plan.result.status === "success")
+                  }
                   onClick={() => {
                     trackProgressRef.current = 0;
                     setSimMode(mode);
@@ -664,7 +790,11 @@ export default function App() {
                   {label}
                 </button>
               ))}
-              <button type="button" onClick={nudge} disabled={simMode === "off"}>
+              <button
+                type="button"
+                onClick={nudge}
+                disabled={simMode === "off"}
+              >
                 Nudge
               </button>
             </div>
@@ -677,7 +807,11 @@ export default function App() {
             <h2>Presets</h2>
             <div className="buttons">
               {presets.map((preset) => (
-                <button key={preset.label} type="button" onClick={() => setJointAngles(preset.angles)}>
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => setJointAngles(preset.angles)}
+                >
                   {preset.label}
                 </button>
               ))}

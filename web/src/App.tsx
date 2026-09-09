@@ -491,22 +491,17 @@ export default function App() {
     <div className="app">
       <header className="app__header">
         <div className="app__headerRow">
-          <div>
-            <h1>Forward &amp; inverse kinematics — {arm.label()}</h1>
-            <p>
-              Product-of-exponentials kinematics in C++ (Eigen + Sophus),
-              compiled to WebAssembly and rendered with WebGL. Drag a slider for
-              FK; drag the end-effector gizmo for IK.
-            </p>
-          </div>
-          <a
-            className="app__github"
-            href="https://github.com/cmaybe/modern-robotics-wasm"
-            target="_blank"
-            rel="noreferrer"
-          >
-            GitHub
+          <a className="app__brand" href="https://cmaybe.github.io/">
+            Modern Robotics
           </a>
+          <nav className="app__nav" aria-label="Project navigation">
+            <a href="https://github.com/cmaybe/modern-robotics-wasm" target="_blank" rel="noreferrer">
+              GitHub
+            </a>
+            <a href="https://cmaybe.github.io/notes/modern-robotics" target="_blank" rel="noreferrer">
+              Docs
+            </a>
+          </nav>
         </div>
       </header>
 

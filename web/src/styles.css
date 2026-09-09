@@ -7,7 +7,7 @@
   --accent: #4dd4ac;
   --accent-dim: #2b7d67;
   --warn: #f0883e;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
 * {
@@ -37,52 +37,58 @@ body {
 }
 
 .app__header {
-  padding: 14px 22px;
-  border-bottom: 1px solid var(--panel-border);
-  background: var(--panel);
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 20;
+  height: 64px;
+  padding: 0 20px 0 18px;
+  border-bottom: 1px solid #1d2531;
+  background: rgba(9, 12, 17, 0.72);
+  backdrop-filter: blur(10px);
 }
 
 .app__headerRow {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  height: 100%;
 }
 
-.app__header h1 {
-  margin: 0 0 4px;
-  font-size: 17px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-}
-
-.app__header p {
-  margin: 0;
-  max-width: 78ch;
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: var(--text-muted);
-}
-
-.app__github {
+.app__brand {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  margin-top: 2px;
-  padding: 7px 12px;
-  border: 1px solid var(--panel-border);
-  border-radius: 999px;
-  background: #1c2230;
+  flex: 0 0 auto;
   color: var(--text);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
   text-decoration: none;
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-  transition: border-color 0.2s ease, color 0.2s ease;
 }
 
-.app__github:hover {
-  border-color: var(--accent-dim);
+.app__nav {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  color: #dfeafc;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.app__navCurrent {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.app__nav a {
+  color: #dfeafc;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.app__nav a:hover {
   color: var(--accent);
 }
 
@@ -311,6 +317,18 @@ body {
 }
 
 @media (max-width: 900px) {
+  .app__header {
+    padding: 0 14px;
+  }
+
+  .app__headerRow {
+    gap: 12px;
+  }
+
+  .app__navCurrent {
+    display: none;
+  }
+
   .app__body {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(240px, 1fr) auto;

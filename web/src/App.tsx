@@ -495,10 +495,18 @@ export default function App() {
             Modern Robotics
           </a>
           <nav className="app__nav" aria-label="Project navigation">
-            <a href="https://github.com/cmaybe/modern-robotics-wasm" target="_blank" rel="noreferrer">
+            <a
+              href="https://github.com/cmaybe/modern-robotics-wasm"
+              target="_blank"
+              rel="noreferrer"
+            >
               GitHub
             </a>
-            <a href="https://cmaybe.github.io/notes/modern-robotics" target="_blank" rel="noreferrer">
+            <a
+              href="https://cmaybe.github.io/notes/modern-robotics"
+              target="_blank"
+              rel="noreferrer"
+            >
               Docs
             </a>
           </nav>
@@ -526,6 +534,7 @@ export default function App() {
         />
 
         <aside className="panel">
+          <h1>{arm.label()}</h1>
           <section className="panel__section">
             <h2>Robot</h2>
             <div className="buttons">

@@ -48,7 +48,9 @@ test.describe("viewer", () => {
 
     await waitForViewer(page);
 
-    await expect(page.locator("h1")).toContainText("Universal Robots UR5");
+    await expect(
+      page.getByRole("button", { name: /Universal Robots UR5/ }),
+    ).toHaveClass(/is-active/);
     await expect(sliders(page)).toHaveCount(6);
 
     const context = await page.locator(".viewer canvas").evaluate((canvas) => {
@@ -85,7 +87,9 @@ test.describe("viewer", () => {
     await waitForViewer(page);
     await page.getByRole("button", { name: /Franka Research 3/ }).click();
 
-    await expect(page.locator("h1")).toContainText("Franka Research 3");
+    await expect(
+      page.getByRole("button", { name: /Franka Research 3/ }),
+    ).toHaveClass(/is-active/);
     await expect(sliders(page)).toHaveCount(7);
 
     // FR3 joint 4 is capped below zero and joint 6 above it.
